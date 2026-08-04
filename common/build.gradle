@@ -6,10 +6,10 @@ plugins {
 repositories {
     mavenCentral()
     maven { url "https://jitpack.io" }
-    // ★ SpongePowered のフルURL（/repository/maven-public/ まで必要です）
-    maven { url "https://spongepowered.org" }
-    // ★ Fabric Loader をダウンロードするために必要な Fabric 公式リポジトリ
-    maven { url "https://fabricmc.net" }
+    // ★ SpongePowered の Maven リポジトリ
+    maven { url "https://repo.spongepowered.org/maven" }
+    // ★ Fabric Loader をダウンロードするために必要な Fabric 公式 Maven
+    maven { url "https://maven.fabricmc.net/" }
 }
 
 dependencies {

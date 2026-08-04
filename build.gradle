@@ -18,9 +18,9 @@ allprojects {
         mavenCentral()
         maven { url "https://jitpack.io" }
         // Sponge（Mixin）の正しいMavenリポジトリURL
-        maven { url "https://spongepowered.org" }
+        maven { url "https://repo.spongepowered.org/maven" }
         // Fabricの正しいMavenリポジトリURL
-        maven { url "https://fabricmc.net" }
+        maven { url "https://maven.fabricmc.net/" }
     }
 
     // 既存の設定（UTF-8指定）と、Minecraft環境のクラスパス結合処理
