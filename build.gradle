@@ -13,14 +13,28 @@ allprojects {
     version = rootProject.version
     group = "com.wynntils"
 
+    // リポジトリのロックや初期化遅れを防ぐため、ここで確実に正しいURLを定義します
     repositories {
         mavenCentral()
-        maven { url "https://maven.parchmentmc.org/" } // kept for transitive compat, safe to remove if unused
         maven { url "https://jitpack.io" }
+        // Sponge（Mixin）の正しいMavenリポジトリURL
+        maven { url "https://spongepowered.org" }
+        // Fabricの正しいMavenリポジトリURL
+        maven { url "https://fabricmc.net" }
     }
 
-    tasks.withType(JavaCompile).configureEach {
+    // 既存の設定（UTF-8指定）と、Minecraft環境のクラスパス結合処理
+    tasks.withType(JavaCompile).configureEach { task ->
         options.encoding = "UTF-8"
+
+        // :common プロジェクトのコンパイル時に、:fabric のクラスパスを安全に結合
+        if (task.project.name == 'common') {
+            def fabricProject = rootProject.findProject(':fabric')
+            if (fabricProject != null) {
+                task.classpath += fabricProject.configurations.compileClasspath
+                task.classpath += fabricProject.configurations.runtimeClasspath
+            }
+        }
     }
 
     java {

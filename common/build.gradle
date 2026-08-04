@@ -2,7 +2,29 @@ plugins {
     id "java-library"
 }
 
+// 共通モジュールに必要な基礎リポジトリ
+repositories {
+    mavenCentral()
+    maven { url "https://jitpack.io" }
+    // ★ SpongePowered のフルURL（/repository/maven-public/ まで必要です）
+    maven { url "https://spongepowered.org" }
+    // ★ Fabric Loader をダウンロードするために必要な Fabric 公式リポジトリ
+    maven { url "https://fabricmc.net" }
+}
+
 dependencies {
+    // コンパイルに必要なアノテーションプロセッサとMixin/ASMライブラリのみを安全に定義します。
+    // ※ここに ':fabric' の configurations を直接参照するような古い記述は一切含めません。
+    compileOnly "org.spongepowered:mixin:0.8.5"
+    annotationProcessor "org.spongepowered:mixin:0.8.5"
+
+    compileOnly "org.ow2.asm:asm:9.7.1"
+    compileOnly "org.ow2.asm:asm-tree:9.7.1"
+    compileOnly "org.ow2.asm:asm-commons:9.7.1"
+
+    annotationProcessor "org.ow2.asm:asm:9.7.1"
+    annotationProcessor "org.ow2.asm:asm-tree:9.7.1"
+    annotationProcessor "org.ow2.asm:asm-commons:9.7.1"
     // We depend on fabric loader here only to use the fabric @Environment annotation and
     // net.fabricmc.loader.api classes at compile time. Do NOT use other classes from fabric loader.
     // Plain (non-"mod") dependency: this is a plain jar, not something Loom needs to remap.
@@ -15,5 +37,6 @@ dependencies {
     }
     implementation("com.github.wynntils:antiope:v${antiope_version}")
 
-    implementation(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixinextras_version}"))
+    annotationProcessor "io.github.llamalad7:mixinextras-common:${mixinextras_version}"
+    implementation "io.github.llamalad7:mixinextras-common:${mixinextras_version}"
 }

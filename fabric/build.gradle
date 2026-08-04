@@ -3,7 +3,7 @@ plugins {
     // The new id activates the non-remapping mode of Loom (there is nothing to remap: 26.1+ ships
     // unobfuscated, so `jar` IS the final artifact - there is no more `remapJar`).
     // Check https://fabricmc.net/develop/ for the currently recommended Loom version for 26.1.2.
-    id "net.fabricmc.fabric-loom" version "1.15"
+    id "net.fabricmc.fabric-loom" version "1.15.5"
     id "com.gradleup.shadow" version "${shadow_version}"
 }
 
@@ -24,6 +24,7 @@ repositories {
 }
 
 dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
     // Plain "implementation" project dependency - common is a normal java-library module now,
     // not something Loom needs to know about.
     implementation project(":common")
@@ -37,8 +38,7 @@ dependencies {
     // TODO: confirm a 26.1.2 build of ModMenu exists before uncommenting - see gradle.properties TODO.
     compileOnly("maven.modrinth:modmenu:${modmenu_version}")
 
-    shadowImplementation("net.neoforged:bus:${neoforge_eventbus_version ?: '8.0.5'}") {
-        exclude group: "org.ow2.asm"
+    shadowImplementation("net.neoforged:bus:${project.hasProperty('neoforge_eventbus_version') ? neoforge_eventbus_version : '8.0.5'}") {        exclude group: "org.ow2.asm"
         exclude group: "org.apache.logging.log4j"
         exclude group: "cpw.mods", module: "modlauncher"
     }
@@ -48,9 +48,6 @@ dependencies {
 
     include(implementation(annotationProcessor("io.github.llamalad7:mixinextras-fabric:${mixinextras_version}")))
 
-    // TODO: confirm a 26.1.2 build of DevAuth exists - see gradle.properties TODO. If not yet available,
-    // just delete this line; it is a dev-convenience dependency only, not required to build/run the mod.
-    runtimeOnly "me.djtheredstoner:DevAuth-fabric:${devauth_version}"
 
     testImplementation "net.fabricmc:fabric-loader-junit:${fabric_loader_version}"
     testImplementation "org.junit.jupiter:junit-jupiter:${junit_version}"
