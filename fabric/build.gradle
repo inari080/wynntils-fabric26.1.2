@@ -21,6 +21,10 @@ configurations {
 repositories {
     maven { url "https://jitpack.io" }
     maven { url "https://api.modrinth.com/maven" }
+    // Fabric Maven を追加して fabric-loader 等の解決を確実にする
+    maven { url "https://maven.fabricmc.net/" }
+    // 必要なら Sponge リポジトリも追加
+    maven { url "https://repo.spongepowered.org/maven" }
 }
 
 dependencies {
