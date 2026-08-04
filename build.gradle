@@ -28,13 +28,13 @@ allprojects {
         options.encoding = "UTF-8"
 
         // :common プロジェクトのコンパイル時に、:fabric のクラスパスを安全に結合
-        if (task.project.name == 'common') {
-            def fabricProject = rootProject.findProject(':fabric')
-            if (fabricProject != null) {
-                task.classpath += fabricProject.configurations.compileClasspath
-                task.classpath += fabricProject.configurations.runtimeClasspath
-            }
-        }
+        // NOTE: merging fabric project's configurations into common's compile classpath
+        // can create circular task/configuration dependencies when fabric depends on common.
+        // This logic previously added fabric project's compile/runtime classpath into
+        // common's compile task, which caused circular dependency issues. We remove
+        // that merging to avoid circular task graph. If specific compile-only
+        // artifacts from fabric are needed, declare them as compileOnly dependencies
+        // in the common module instead.
     }
 
     java {
