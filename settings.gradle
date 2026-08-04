@@ -10,8 +10,8 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    // プロジェクト側の repositories を優先しつつ、必要な共通リポジトリを定義します
-    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT_REPOS)
+    // repositoriesMode.set(RepositoriesMode.PREFER_PROJECT_REPOS) を下のように修正
+    //repositoriesMode.set(org.gradle.api.initialization.resolve.RepositoriesMode.PREFER_PROJECT_REPOS)
     repositories {
         mavenLocal()
         // Fabric の公式 Maven（fabric-loader 等）
