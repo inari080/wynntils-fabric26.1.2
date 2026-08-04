@@ -1,0 +1,102 @@
+/*
+ * Copyright © Wynntils 2023-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.models.spells.event;
+
+import com.wynntils.core.components.Models;
+import com.wynntils.models.spells.type.SpellDirection;
+import com.wynntils.models.spells.type.SpellFailureReason;
+import com.wynntils.models.spells.type.SpellType;
+import net.neoforged.bus.api.Event;
+
+public abstract class SpellEvent extends Event {
+    public abstract static class Casting extends SpellEvent {
+        private final SpellDirection[] spellDirectionArray;
+
+        protected Casting(SpellDirection[] spellDirectionArray) {
+            this.spellDirectionArray = spellDirectionArray;
+        }
+
+        public SpellDirection[] getSpellDirectionArray() {
+            return spellDirectionArray.clone();
+        }
+    }
+
+    /**
+     * Fired upon user inputting the next click in a sequence to cast a spell.
+     */
+    public static final class Partial extends Casting {
+        public Partial(SpellDirection[] spellDirectionArray) {
+            super(spellDirectionArray);
+        }
+    }
+
+    /**
+     * Fired upon spell timeout from not finishing a cast
+     */
+    public static final class Expired extends Casting {
+        public Expired() {
+            super(SpellDirection.NO_SPELL);
+        }
+    }
+
+    /**
+     * Fired when 3 spell inputs have been registered, no failure reason was detected in chat,
+     * and no spell cast actionbar message has appeared.
+     */
+    public static final class Unconfirmed extends Casting {
+        public Unconfirmed(SpellDirection[] spellDirectionArray) {
+            super(spellDirectionArray);
+        }
+
+        public SpellType getSpellType() {
+            SpellDirection[] spellDirectionArray = getSpellDirectionArray();
+            if (spellDirectionArray.length != 3) return null;
+
+            return SpellType.fromSpellDirectionArray(Models.Character.getClassType(), spellDirectionArray);
+        }
+    }
+
+    public static final class Cast extends SpellEvent {
+        private final SpellType spellType;
+        private final int manaCost;
+        private final int healthCost;
+
+        public Cast(SpellType spellType, int manaCost) {
+            this(spellType, manaCost, 0);
+        }
+
+        public Cast(SpellType spellType, int manaCost, int healthCost) {
+            this.spellType = spellType;
+            this.manaCost = manaCost;
+            this.healthCost = healthCost;
+        }
+
+        public SpellType getSpellType() {
+            return spellType;
+        }
+
+        public int getManaCost() {
+            return manaCost;
+        }
+
+        public int getHealthCost() {
+            return healthCost;
+        }
+    }
+
+    public static final class CastExpired extends SpellEvent {}
+
+    public static final class Failed extends SpellEvent {
+        private final SpellFailureReason failureReason;
+
+        public Failed(SpellFailureReason failureReason) {
+            this.failureReason = failureReason;
+        }
+
+        public SpellFailureReason getFailureReason() {
+            return failureReason;
+        }
+    }
+}

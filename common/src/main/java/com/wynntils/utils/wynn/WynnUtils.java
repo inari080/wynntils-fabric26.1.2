@@ -1,0 +1,36 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.utils.wynn;
+
+import org.apache.commons.lang3.StringUtils;
+
+public final class WynnUtils {
+    private static final String ITEM_NAME_MARKER = "\uDAFC\uDC00";
+    private static final String UNIDENTIFIED_ITEM_MARKER = "\uDB00\uDC02";
+    // This marker's purpose is currently unknown but is present on some items.
+    private static final String UNKNOWN_MARKER = "\uE008";
+
+    /**
+     * Removes the characters 'À' ('\u00c0') and ֎ ('\u058e') that is sometimes added in Wynn APIs and
+     * replaces '’' ('\u2019') (RIGHT SINGLE QUOTATION MARK) with '\''
+     *
+     * @param input string
+     * @return the string without these two chars
+     */
+    public static String normalizeBadString(String input) {
+        if (input == null) return "";
+        return StringUtils.replaceEach(input, new String[] {"ÀÀÀ", "À", "֎", "’"}, new String[] {" ", "", "", "'"});
+    }
+
+    /**
+     * Removes Wynncraft's item-name boundary marker character used around certain item names.
+     */
+    public static String stripItemNameMarkers(String input) {
+        if (input == null) return "";
+        return input.replace(ITEM_NAME_MARKER, "")
+                .replace(UNIDENTIFIED_ITEM_MARKER, "")
+                .replace(UNKNOWN_MARKER, "");
+    }
+}

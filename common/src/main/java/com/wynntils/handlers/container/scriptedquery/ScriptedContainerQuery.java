@@ -1,0 +1,104 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.handlers.container.scriptedquery;
+
+import com.wynntils.core.components.Handlers;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.container.ContainerQueryException;
+import com.wynntils.handlers.container.ContainerQueryStep;
+import com.wynntils.handlers.container.type.ContainerContent;
+import com.wynntils.handlers.container.type.ContainerContentChangeType;
+import com.wynntils.models.containers.Container;
+import com.wynntils.utils.wynn.ItemUtils;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import java.util.LinkedList;
+import java.util.function.Consumer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+
+public final class ScriptedContainerQuery implements ContainerQueryStep {
+    private final LinkedList<QueryStep> steps;
+    private final Consumer<String> errorHandler;
+    private final String name;
+    private QueryStep currentStep = null;
+
+    ScriptedContainerQuery(String name, LinkedList<QueryStep> steps, Consumer<String> errorHandler) {
+        this.name = name;
+        this.steps = steps;
+        this.errorHandler = errorHandler;
+    }
+
+    public static QueryBuilder builder(String name) {
+        return new QueryBuilder(name);
+    }
+
+    public static boolean containerHasSlot(
+            ContainerContent container, int slotNum, Item expectedItemType, StyledText expectedItemName) {
+        ItemStack itemStack = container.items().get(slotNum);
+        return itemStack.is(expectedItemType)
+                && ItemUtils.getItemName(itemStack).equals(expectedItemName);
+    }
+
+    public void executeQuery() {
+        if (!popOneStep()) return;
+
+        Handlers.ContainerQuery.runQuery(this);
+    }
+
+    @Override
+    public boolean startStep(ContainerContent container) throws ContainerQueryException {
+        return currentStep.startStep(this, container);
+    }
+
+    @Override
+    public boolean verifyContainer(Class<? extends Container> containerType) {
+        return currentStep.getVerification().verify(containerType);
+    }
+
+    @Override
+    public boolean verifyContentChange(
+            ContainerContent container, Int2ObjectMap<ItemStack> changes, ContainerContentChangeType changeType) {
+        return currentStep.getContentVerification().verify(container, changes, changeType);
+    }
+
+    @Override
+    public int getSetSlotAccumulationTicks() {
+        return currentStep != null ? currentStep.getSetSlotAccumulationTicks() : 0;
+    }
+
+    @Override
+    public void handleContent(ContainerContent container) throws ContainerQueryException {
+        currentStep.getHandleContent().processContainer(container);
+    }
+
+    @Override
+    public ContainerQueryStep getNextStep(ContainerContent container) {
+        if (currentStep == null) return null;
+        return currentStep.getNextStep(this);
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public void onError(String errorMsg) {
+        errorHandler.accept(errorMsg);
+        // Remove all remaining steps
+        currentStep = null;
+        steps.clear();
+    }
+
+    boolean popOneStep() {
+        if (steps.isEmpty()) {
+            currentStep = null;
+            return false;
+        }
+
+        this.currentStep = steps.pop();
+        return true;
+    }
+}

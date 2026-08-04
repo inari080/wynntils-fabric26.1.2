@@ -1,0 +1,109 @@
+/*
+ * Copyright © Wynntils 2024-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.screens.itemfilter.widgets;
+
+import com.wynntils.screens.base.widgets.WynntilsCheckbox;
+import com.wynntils.services.itemfilter.filters.BooleanStatFilter;
+import com.wynntils.services.itemfilter.type.StatProviderAndFilterPair;
+import com.wynntils.utils.type.OptionalBoolean;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+
+public class BooleanFilterWidget extends GeneralFilterWidget {
+    private final WynntilsCheckbox trueCheckbox;
+    private final WynntilsCheckbox falseCheckbox;
+
+    private OptionalBoolean state = OptionalBoolean.NULL;
+
+    protected BooleanFilterWidget(int x, int y, StatProviderAndFilterPair filterPair, ProviderFilterListWidget parent) {
+        super(x, y, 195, 145, Component.literal("Boolean Filter Widget"), parent);
+
+        this.trueCheckbox = new WynntilsCheckbox(
+                getX() + 10,
+                getY() + 35,
+                20,
+                Component.translatable("screens.wynntils.itemFilter.booleanTrue"),
+                this.state == OptionalBoolean.TRUE,
+                150,
+                (checkbox, b) -> {
+                    if (b) {
+                        toggleState(OptionalBoolean.TRUE);
+                    }
+                });
+
+        this.falseCheckbox = new WynntilsCheckbox(
+                getX() + 10,
+                getY() + 90,
+                20,
+                Component.translatable("screens.wynntils.itemFilter.booleanFalse"),
+                this.state == OptionalBoolean.FALSE,
+                150,
+                (checkbox, b) -> {
+                    if (b) {
+                        toggleState(OptionalBoolean.FALSE);
+                    }
+                });
+
+        if (filterPair != null) {
+            if (filterPair.statFilter().matches(true)) {
+                state = OptionalBoolean.TRUE;
+                trueCheckbox.selected = true;
+                falseCheckbox.selected = false;
+            } else if (filterPair.statFilter().matches(false)) {
+                state = OptionalBoolean.FALSE;
+                trueCheckbox.selected = false;
+                falseCheckbox.selected = true;
+            }
+        }
+    }
+
+    @Override
+    protected void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        trueCheckbox.render(guiGraphics, mouseX, mouseY, partialTick);
+        falseCheckbox.render(guiGraphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean isDoubleClick) {
+        if (trueCheckbox.isMouseOver(event.x(), event.y())) {
+            return trueCheckbox.mouseClicked(event, isDoubleClick);
+        } else if (falseCheckbox.isMouseOver(event.x(), event.y())) {
+            return falseCheckbox.mouseClicked(event, isDoubleClick);
+        }
+
+        return false;
+    }
+
+    @Override
+    public void updateY(int y) {
+        // Isn't scrollable
+    }
+
+    @Override
+    protected StatProviderAndFilterPair getFilterPair() {
+        if (state == OptionalBoolean.NULL) return null;
+
+        BooleanStatFilter statFilter =
+                new BooleanStatFilter.BooleanStatFilterFactory().fromBoolean(state == OptionalBoolean.TRUE);
+
+        return new StatProviderAndFilterPair(parent.getProvider(), statFilter);
+    }
+
+    private void toggleState(OptionalBoolean newState) {
+        // Update the state and disable the opposite checkbox if necessary
+        if (state == newState) {
+            state = OptionalBoolean.NULL;
+        } else if (newState == OptionalBoolean.TRUE) {
+            state = OptionalBoolean.TRUE;
+            falseCheckbox.selected = false;
+        } else {
+            state = OptionalBoolean.FALSE;
+            trueCheckbox.selected = false;
+        }
+
+        parent.updateQuery();
+    }
+}

@@ -1,0 +1,49 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.models.items.annotators.gui;
+
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.item.GuiItemAnnotator;
+import com.wynntils.handlers.item.ItemAnnotation;
+import com.wynntils.models.elements.type.Skill;
+import com.wynntils.models.items.items.gui.SkillPointItem;
+import com.wynntils.utils.mc.LoreUtils;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import net.minecraft.world.item.ItemStack;
+
+public final class SkillPointAnnotator implements GuiItemAnnotator {
+    // Test in SkillPointAnnotator_SKILL_POINT_PATTERN
+    private static final Pattern SKILL_POINT_PATTERN = Pattern.compile(
+            "^[\uDB00\uDC00-\uDB00\uDC0F]§dUpgrade your §[2ebcf][\uE001\uE003\uE004\uE002\uE000] (.*)§d skill$");
+    // Test in SkillPointAnnotator_LORE_PATTERN
+    private static final Pattern LORE_PATTERN = Pattern.compile("^.*§7(-?\\d+) points§r.*§6-?\\d+ points$");
+    // Test in SkillPointAnnotator_MODIFIED_GEAR_PATTERN
+    private static final Pattern MODIFIED_GEAR_PATTERN =
+            Pattern.compile("^.*§b\\*§8 Modified by your gear \\(([-+]?\\d+)\\)$");
+
+    @Override
+    public ItemAnnotation getAnnotation(ItemStack itemStack, StyledText name) {
+        Matcher matcher = name.getMatcher(SKILL_POINT_PATTERN);
+        if (!matcher.matches()) return null;
+
+        String skillName = matcher.group(1);
+        Skill skill = Skill.fromString(skillName);
+
+        Matcher m = LoreUtils.matchLoreLine(itemStack, 3, LORE_PATTERN);
+        if (!m.matches()) return null;
+
+        int skillPoints = Integer.parseInt(m.group(1));
+
+        int gearModifiedAmount = 0;
+
+        m = LoreUtils.matchLoreLine(itemStack, 4, MODIFIED_GEAR_PATTERN);
+        if (m.matches()) {
+            gearModifiedAmount = Integer.parseInt(m.group(1));
+        }
+
+        return new SkillPointItem(skill, skillPoints, skillPoints - gearModifiedAmount);
+    }
+}

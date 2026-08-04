@@ -1,0 +1,232 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.screens.settings.widgets;
+
+import com.google.common.collect.Lists;
+import com.wynntils.core.components.Managers;
+import com.wynntils.core.consumers.features.Configurable;
+import com.wynntils.core.consumers.features.ExternalConfigurationScreen;
+import com.wynntils.core.consumers.features.Feature;
+import com.wynntils.core.consumers.overlays.CustomNameProperty;
+import com.wynntils.core.consumers.overlays.Overlay;
+import com.wynntils.core.persisted.config.Config;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.screens.base.widgets.BasicHoverableButton;
+import com.wynntils.screens.base.widgets.WynntilsButton;
+import com.wynntils.screens.base.widgets.WynntilsCheckbox;
+import com.wynntils.screens.settings.WynntilsBookSettingsScreen;
+import com.wynntils.utils.colors.CommonColors;
+import com.wynntils.utils.colors.CustomColor;
+import com.wynntils.utils.mc.ComponentUtils;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.render.FontRenderer;
+import com.wynntils.utils.render.type.HorizontalAlignment;
+import com.wynntils.utils.render.type.TextShadow;
+import com.wynntils.utils.render.type.VerticalAlignment;
+import java.util.List;
+import java.util.Optional;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.input.InputWithModifiers;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+
+public class ConfigurableButton extends WynntilsButton {
+    private final Configurable configurable;
+    private final WynntilsCheckbox enabledCheckbox;
+    private final Optional<BasicHoverableButton> ecsButton;
+    private final int maskTopY;
+    private final int maskBottomY;
+    private final int matchingConfigs;
+    private final List<Component> descriptionTooltip;
+    private final List<Component> toggleTooltip;
+    private final List<Component> ecsTooltip;
+    private final WynntilsBookSettingsScreen settingsScreen;
+
+    public ConfigurableButton(
+            int x,
+            int y,
+            int width,
+            int height,
+            Configurable configurable,
+            WynntilsBookSettingsScreen screen,
+            int matchingConfigs) {
+        super(x, y, width, height, Component.literal(configurable.getTranslatedName()));
+        this.configurable = configurable;
+        this.settingsScreen = screen;
+
+        if (configurable instanceof Feature feature) {
+            descriptionTooltip =
+                    ComponentUtils.wrapTooltips(List.of(Component.literal(feature.getTranslatedDescription())), 150);
+            toggleTooltip = ComponentUtils.wrapTooltips(
+                    List.of(Component.translatable(
+                            "screens.wynntils.settingsScreen.toggleFeature", configurable.getTranslatedName())),
+                    150);
+        } else {
+            descriptionTooltip = List.of();
+            toggleTooltip = ComponentUtils.wrapTooltips(
+                    List.of(Component.translatable(
+                            "screens.wynntils.settingsScreen.toggleOverlay", configurable.getTranslatedName())),
+                    150);
+        }
+
+        boolean enabled = false;
+        if (configurable instanceof Overlay selectedOverlay) {
+            enabled = Managers.Overlay.isEnabled(selectedOverlay);
+        } else if (configurable instanceof Feature selectedFeature) {
+            enabled = selectedFeature.userEnabled.get();
+        }
+
+        this.enabledCheckbox = new WynntilsCheckbox(x + width - 10, y, 10, Component.literal(""), enabled, 0);
+        if (configurable instanceof ExternalConfigurationScreen ecs) {
+            this.ecsButton = Optional.of(new BasicHoverableButton(
+                    x + width - 21,
+                    y,
+                    10,
+                    10,
+                    ecs.getButtonTexture(),
+                    (b) -> McUtils.mc().setScreen(ecs.getExternalConfigurationScreen(settingsScreen)),
+                    List.of(Component.literal("Open ecs"))));
+            ecsTooltip = ComponentUtils.wrapTooltips(
+                    List.of(Component.literal(
+                            configurable.getTranslation("externalConfigurationScreen", ecs.getTranslationObjects()))),
+                    150);
+        } else {
+            this.ecsButton = Optional.empty();
+            this.ecsTooltip = List.of();
+        }
+
+        this.maskTopY = settingsScreen.getMaskTopY();
+        this.maskBottomY = settingsScreen.getConfigurableMaskBottomY();
+        this.matchingConfigs = matchingConfigs;
+    }
+
+    @Override
+    public void renderContents(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // Don't want to display tooltip when the tile is outside the mask from the screen
+        if (isHovered && (mouseY <= maskTopY || mouseY >= maskBottomY)) {
+            isHovered = false;
+        }
+
+        CustomColor color = isHovered ? CommonColors.YELLOW : CommonColors.WHITE;
+
+        if (McUtils.screen() instanceof WynntilsBookSettingsScreen bookSettingsScreen) {
+            if (bookSettingsScreen.getSelectedConfigurable() == configurable) {
+                color = CommonColors.GRAY;
+            }
+        }
+
+        int indent = 0;
+        if (configurable instanceof Feature feature) {
+            if (Managers.Feature.isSubFeature(feature)) {
+                indent = 12;
+            }
+        } else if (configurable instanceof Overlay overlay) {
+            Feature parent = Managers.Overlay.getOverlayParent(overlay);
+            if (parent != null && Managers.Feature.isSubFeature(parent)) {
+                indent = 24;
+            } else {
+                indent = 12;
+            }
+        }
+
+        String textToRender = configurable.getTranslatedName();
+
+        if (configurable instanceof CustomNameProperty customNameProperty) {
+            if (!customNameProperty.getCustomName().get().isEmpty()) {
+                textToRender = customNameProperty.getCustomName().get();
+            }
+        }
+
+        if (matchingConfigs > 0) {
+            textToRender += ChatFormatting.GRAY + " [" + matchingConfigs + "]";
+        }
+
+        FontRenderer.getInstance()
+                .renderScrollingText(
+                        guiGraphics,
+                        StyledText.fromString(textToRender),
+                        this.getX() + indent,
+                        this.getY(),
+                        this.width - indent - 11,
+                        color,
+                        HorizontalAlignment.LEFT,
+                        VerticalAlignment.TOP,
+                        TextShadow.NORMAL,
+                        1f);
+        enabledCheckbox.render(guiGraphics, mouseX, mouseY, partialTick);
+        ecsButton.ifPresent(
+                basicHoverableButton -> basicHoverableButton.render(guiGraphics, mouseX, mouseY, partialTick));
+
+        if (isHovered) {
+            if (enabledCheckbox.isHovered()) {
+                guiGraphics.setTooltipForNextFrame(
+                        Lists.transform(toggleTooltip, Component::getVisualOrderText), mouseX, mouseY);
+            } else if (ecsButton.isPresent() && ecsButton.get().isHovered()) {
+                guiGraphics.setTooltipForNextFrame(
+                        Lists.transform(ecsTooltip, Component::getVisualOrderText), mouseX, mouseY);
+            } else if (configurable instanceof Feature) {
+                guiGraphics.setTooltipForNextFrame(
+                        Lists.transform(descriptionTooltip, Component::getVisualOrderText), mouseX, mouseY);
+            }
+        }
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean isDoubleClick) {
+        // Prevent interaction when the tile is outside of the mask from the screen
+        if ((event.y() <= maskTopY || event.y() >= maskBottomY)) return false;
+
+        // Toggle the enabled state of the configurable when toggling the checkbox
+        if (enabledCheckbox.isMouseOver(event.x(), event.y())) {
+            if (configurable instanceof Feature feature) {
+                feature.setUserEnabled(!feature.userEnabled.get());
+            } else if (configurable instanceof Overlay) {
+                Optional<Config<?>> configOpt = configurable.getConfigOptionFromString("userEnabled");
+
+                if (configOpt.isPresent()) {
+                    Config<Boolean> config = (Config<Boolean>) configOpt.get();
+                    config.setValue(!config.get());
+                } else {
+                    return false;
+                }
+            }
+
+            // Repopulate screen to update new enabled/disabled states
+            if (McUtils.screen() instanceof WynntilsBookSettingsScreen bookSettingsScreen) {
+                bookSettingsScreen.populateConfigurables();
+                bookSettingsScreen.changesMade();
+            }
+
+            return enabledCheckbox.mouseClicked(event, isDoubleClick);
+        }
+
+        if (ecsButton.isPresent() && ecsButton.get().isMouseOver(event.x(), event.y())) {
+            ecsButton.get().mouseClicked(event, isDoubleClick);
+            return true;
+        }
+
+        return super.mouseClicked(event, isDoubleClick);
+    }
+
+    @Override
+    public void onPress(InputWithModifiers input) {
+        if (McUtils.screen() instanceof WynntilsBookSettingsScreen bookSettingsScreen) {
+            bookSettingsScreen.setSelectedConfigurable(configurable);
+        }
+    }
+
+    @Override
+    public void setY(int y) {
+        super.setY(y);
+
+        enabledCheckbox.setY(y);
+        ecsButton.ifPresent(basicTexturedButton -> basicTexturedButton.setY(y));
+    }
+
+    public Configurable getConfigurable() {
+        return configurable;
+    }
+}

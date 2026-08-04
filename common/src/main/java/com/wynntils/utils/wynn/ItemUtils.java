@@ -1,0 +1,100 @@
+/*
+ * Copyright © Wynntils 2021-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.utils.wynn;
+
+import com.wynntils.core.components.Models;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.models.items.WynnItem;
+import com.wynntils.models.items.items.game.GatheringToolItem;
+import com.wynntils.models.items.properties.GearTypeItemProperty;
+import com.wynntils.models.items.properties.RequirementItemProperty;
+import com.wynntils.utils.mc.McUtils;
+import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
+import net.minecraft.network.HashedStack;
+import net.minecraft.world.item.ItemStack;
+
+public final class ItemUtils {
+    private static final Pattern EMPTY_ARMOR_SLOT_PATTERN =
+            Pattern.compile("§7(?:Helmet|Chestplate|Leggings|Boots) Slot");
+    private static final Pattern EMPTY_ACCESSORY_SLOT_PATTERN = Pattern.compile("§7(?:Ring|Bracelet|Necklace) Slot");
+    public static final Pattern ITEM_RARITY_PATTERN =
+            Pattern.compile("(Normal|Set|Unique|Rare|Legendary|Fabled|Mythic)( Raid)? (Item|Reward).*");
+
+    public static boolean isWeapon(ItemStack itemStack) {
+        Optional<GearTypeItemProperty> gearItemOpt =
+                Models.Item.asWynnItemProperty(itemStack, GearTypeItemProperty.class);
+        if (gearItemOpt.isEmpty()) return false;
+
+        return gearItemOpt.get().getGearType().isWeapon();
+    }
+
+    public static boolean isUsableWeapon(ItemStack itemStack) {
+        Optional<GearTypeItemProperty> gearItemOpt =
+                Models.Item.asWynnItemProperty(itemStack, GearTypeItemProperty.class);
+        if (gearItemOpt.isEmpty()) return false;
+        if (!gearItemOpt.get().getGearType().isValidWeapon(Models.Character.getClassType())) return false;
+
+        Optional<RequirementItemProperty> reqItemOpt =
+                Models.Item.asWynnItemProperty(itemStack, RequirementItemProperty.class);
+        if (reqItemOpt.isEmpty()) return false;
+        if (!reqItemOpt.get().meetsActualRequirements()) return false;
+
+        return true;
+    }
+
+    public static boolean isGatheringTool(ItemStack itemStack) {
+        Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
+        return wynnItemOpt
+                .filter(wynnItem -> wynnItem instanceof GatheringToolItem)
+                .isPresent();
+    }
+
+    public static boolean isEmptyArmorSlot(ItemStack itemStack) {
+        return getItemName(itemStack).matches(EMPTY_ARMOR_SLOT_PATTERN);
+    }
+
+    public static boolean isEmptyAccessorySlot(ItemStack itemStack) {
+        return getItemName(itemStack).matches(EMPTY_ACCESSORY_SLOT_PATTERN);
+    }
+
+    public static StyledText getItemName(ItemStack itemStack) {
+        return StyledText.fromComponent(itemStack.getHoverName());
+    }
+
+    public static boolean isItemListsEqual(List<ItemStack> firstItems, List<ItemStack> secondItems) {
+        if (firstItems.size() != secondItems.size()) return false;
+
+        for (int i = 0; i < firstItems.size(); i++) {
+            ItemStack newItem = firstItems.get(i);
+            ItemStack oldItem = secondItems.get(i);
+            if (!isItemEqual(oldItem, newItem)) return false;
+        }
+        return true;
+    }
+
+    public static boolean isItemEqual(ItemStack oldItem, ItemStack newItem) {
+        if (oldItem == null || newItem == null) return oldItem != newItem;
+
+        return newItem.getItem().equals(oldItem.getItem())
+                && newItem.getDamageValue() == oldItem.getDamageValue()
+                && newItem.getCount() == oldItem.getCount()
+                && ItemStack.isSameItemSameComponents(oldItem, newItem);
+    }
+
+    public static boolean areItemsSimilar(ItemStack a, ItemStack b) {
+        if (a.isEmpty()) {
+            return b.isEmpty();
+        } else {
+            return !b.isEmpty()
+                    && a.getHoverName().getString().equals(b.getHoverName().getString());
+        }
+    }
+
+    public static HashedStack createHashedItem(ItemStack itemStack) {
+        return HashedStack.create(itemStack, McUtils.mc().getConnection().decoratedHashOpsGenenerator());
+    }
+}

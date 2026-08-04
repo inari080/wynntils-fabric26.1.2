@@ -1,0 +1,608 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.screens.maps;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Streams;
+import com.mojang.blaze3d.platform.InputConstants;
+import com.wynntils.core.components.Managers;
+import com.wynntils.core.components.Models;
+import com.wynntils.core.components.Services;
+import com.wynntils.core.consumers.screens.WynntilsScreen;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.features.debug.MappingProgressFeature;
+import com.wynntils.screens.base.TooltipProvider;
+import com.wynntils.screens.maps.widgets.MapButton;
+import com.wynntils.services.map.MapTexture;
+import com.wynntils.services.map.pois.Poi;
+import com.wynntils.utils.MathUtils;
+import com.wynntils.utils.colors.CommonColors;
+import com.wynntils.utils.colors.CustomColor;
+import com.wynntils.utils.mc.KeyboardUtils;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.mc.type.Location;
+import com.wynntils.utils.mc.type.PoiLocation;
+import com.wynntils.utils.render.FontRenderer;
+import com.wynntils.utils.render.MapRenderer;
+import com.wynntils.utils.render.RenderUtils;
+import com.wynntils.utils.render.Texture;
+import com.wynntils.utils.render.type.HorizontalAlignment;
+import com.wynntils.utils.render.type.PointerType;
+import com.wynntils.utils.render.type.TextShadow;
+import com.wynntils.utils.render.type.VerticalAlignment;
+import com.wynntils.utils.type.BoundingBox;
+import com.wynntils.utils.type.BoundingShape;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvents;
+import org.lwjgl.glfw.GLFW;
+
+public abstract class AbstractMapScreen extends WynntilsScreen {
+    protected List<MapButton> mapButtons = new ArrayList<>();
+
+    protected static final float SCREEN_SIDE_OFFSET = 10;
+    protected static final int MAP_CENTER_X = -360;
+    protected static final int MAP_CENTER_Z = -3000;
+    private static final float BORDER_OFFSET = 6;
+    private static final int MAX_X = 1650;
+    private static final int MAX_Z = -150;
+    private static final int MIN_X = -2400;
+    private static final int MIN_Z = -6600;
+    private static final int CENTER_ZOOM_LEVEL = 20;
+
+    protected boolean holdingMapKey = false;
+    protected boolean firstInit = true;
+    protected boolean shouldCenterMap = true;
+    protected boolean isPanning = false;
+
+    protected float renderWidth;
+    protected float renderHeight;
+    protected float renderX;
+    protected float renderY;
+
+    protected float renderedBorderXOffset;
+    protected float renderedBorderYOffset;
+
+    protected float mapWidth;
+    protected float mapHeight;
+    protected float centerX;
+    protected float centerZ;
+
+    protected float mapCenterX;
+    protected float mapCenterZ;
+
+    protected boolean holdingZoomHandle = false;
+    protected float zoomHandleRenderX;
+    private float zoomHandleRenderY;
+
+    // Zooming updates zoomLevel, but we also cache zoomRenderScale for rendering
+    protected float zoomLevel = MapRenderer.DEFAULT_ZOOM_LEVEL;
+    protected float zoomRenderScale = MapRenderer.getZoomRenderScaleFromLevel(zoomLevel);
+
+    protected final Optional<Screen> previousScreen;
+
+    protected Poi hovered = null;
+
+    protected AbstractMapScreen() {
+        super(Component.literal("Map"));
+        centerMapAroundPlayer();
+        this.previousScreen = Optional.empty();
+    }
+
+    protected AbstractMapScreen(Screen previousScreen) {
+        super(Component.literal("Map"));
+        centerMapAroundPlayer();
+        this.previousScreen = Optional.ofNullable(previousScreen);
+    }
+
+    protected AbstractMapScreen(float mapCenterX, float mapCenterZ) {
+        super(Component.literal("Map"));
+        updateMapCenter(mapCenterX, mapCenterZ);
+        this.previousScreen = Optional.empty();
+    }
+
+    protected AbstractMapScreen(float mapCenterX, float mapCenterZ, float zoomLevel) {
+        super(Component.literal("Map"));
+        updateMapCenter(mapCenterX, mapCenterZ);
+        setZoomLevel(zoomLevel);
+        this.previousScreen = Optional.empty();
+
+        // Overwrite so map is not centered
+        shouldCenterMap = false;
+    }
+
+    @Override
+    protected void doInit() {
+        rememberKeyHolds();
+
+        renderWidth = this.width - SCREEN_SIDE_OFFSET * 2f;
+        renderHeight = this.height - SCREEN_SIDE_OFFSET * 2f;
+        renderX = SCREEN_SIDE_OFFSET;
+        renderY = SCREEN_SIDE_OFFSET;
+
+        float borderScaleX = (float) this.width / Texture.FULLSCREEN_MAP_BORDER.width();
+        float borderScaleY = (float) this.height / Texture.FULLSCREEN_MAP_BORDER.height();
+
+        renderedBorderXOffset = BORDER_OFFSET * borderScaleX;
+        renderedBorderYOffset = BORDER_OFFSET * borderScaleY;
+
+        mapWidth = renderWidth - renderedBorderXOffset * 2f;
+        mapHeight = renderHeight - renderedBorderYOffset * 2f;
+        centerX = renderX + renderedBorderXOffset + mapWidth / 2f;
+        centerZ = renderY + renderedBorderYOffset + mapHeight / 2f;
+
+        zoomHandleRenderX = this.renderWidth - renderedBorderXOffset - 15;
+
+        mapButtons = new ArrayList<>();
+
+        // region Zoom slider & buttons
+        this.addRenderableWidget(Button.builder(Component.literal("-"), (button -> {
+                    int adjustment = KeyboardUtils.isShiftDown() ? 1 : 5;
+                    setZoomLevel(zoomLevel - adjustment);
+                }))
+                .pos((int) (this.renderWidth - renderedBorderXOffset - 16), (int)
+                        (this.renderHeight - renderedBorderYOffset - 16))
+                .size(14, 14)
+                .tooltip(Tooltip.create(Component.translatable("screens.wynntils.map.zoomDecrement")))
+                .build());
+
+        this.addRenderableWidget(Button.builder(Component.literal("+"), (button -> {
+                    int adjustment = KeyboardUtils.isShiftDown() ? 1 : 5;
+                    setZoomLevel(zoomLevel + adjustment);
+                }))
+                .pos((int) (this.renderWidth - renderedBorderXOffset - 16), (int)
+                        (this.renderHeight - renderedBorderYOffset - 16 - 100))
+                .size(14, 14)
+                .tooltip(Tooltip.create(Component.translatable("screens.wynntils.map.zoomIncrement")))
+                .build());
+        // endregion
+    }
+
+    protected void renderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        List<GuiEventListener> widgets =
+                Streams.concat(children.stream(), mapButtons.stream()).toList();
+        for (GuiEventListener child : widgets) {
+            if (child instanceof TooltipProvider tooltipProvider && child.isMouseOver(mouseX, mouseY)) {
+                guiGraphics.setTooltipForNextFrame(
+                        Lists.transform(tooltipProvider.getTooltipLines(), Component::getVisualOrderText),
+                        mouseX,
+                        mouseY);
+                return;
+            }
+        }
+    }
+
+    protected void renderMapBorder(GuiGraphics guiGraphics) {
+        RenderUtils.drawScalingTexturedRect(
+                guiGraphics,
+                Texture.FULLSCREEN_MAP_BORDER.identifier(),
+                renderX,
+                renderY,
+                renderWidth,
+                renderHeight,
+                Texture.FULLSCREEN_MAP_BORDER.width(),
+                Texture.FULLSCREEN_MAP_BORDER.height());
+    }
+
+    protected void renderPois(
+            List<Poi> pois,
+            GuiGraphics guiGraphics,
+            BoundingBox textureBoundingBox,
+            float poiScale,
+            int mouseX,
+            int mouseY) {
+        hovered = null;
+
+        List<Poi> filteredPois = getRenderedPois(pois, textureBoundingBox, poiScale, mouseX, mouseY);
+
+        // Reverse and Render
+        for (int i = filteredPois.size() - 1; i >= 0; i--) {
+            Poi poi = filteredPois.get(i);
+
+            float poiRenderX = MapRenderer.getRenderX(poi, mapCenterX, centerX, zoomRenderScale);
+            float poiRenderZ = MapRenderer.getRenderZ(poi, mapCenterZ, centerZ, zoomRenderScale);
+
+            poi.renderAt(
+                    guiGraphics, poiRenderX, poiRenderZ, hovered == poi, poiScale, zoomRenderScale, zoomLevel, true);
+        }
+    }
+
+    protected List<Poi> getRenderedPois(
+            List<Poi> pois, BoundingBox textureBoundingBox, float poiScale, int mouseX, int mouseY) {
+        List<Poi> filteredPois = new ArrayList<>();
+
+        // Filter and find hovered
+        for (int i = pois.size() - 1; i >= 0; i--) {
+            Poi poi = pois.get(i);
+            PoiLocation location = poi.getLocation();
+            // This is due to bad design of the compass dynamic waypoint provider,
+            // once that is fixed this can be removed
+            if (location == null) continue;
+
+            if (!poi.isVisible(zoomRenderScale, zoomLevel)) {
+                continue;
+            }
+
+            float poiRenderX = MapRenderer.getRenderX(poi, mapCenterX, centerX, zoomRenderScale);
+            float poiRenderZ = MapRenderer.getRenderZ(poi, mapCenterZ, centerZ, zoomRenderScale);
+
+            float poiWidth = poi.getWidth(zoomRenderScale, poiScale);
+            float poiHeight = poi.getHeight(zoomRenderScale, poiScale);
+
+            BoundingBox filterBox = BoundingBox.centered(location.getX(), location.getZ(), poiWidth, poiHeight);
+            BoundingBox mouseBox = BoundingBox.centered(poiRenderX, poiRenderZ, poiWidth, poiHeight);
+
+            if (BoundingShape.intersects(filterBox, textureBoundingBox)) {
+                filteredPois.add(poi);
+                if (hovered == null && mouseBox.contains(mouseX, mouseY)) {
+                    hovered = poi;
+                }
+            }
+        }
+
+        // Add hovered poi as first
+        if (hovered != null) {
+            filteredPois.remove(hovered);
+            filteredPois.addFirst(hovered);
+        }
+
+        return filteredPois;
+    }
+
+    protected void setCompassToMouseCoords(double mouseX, double mouseY, boolean removeAll) {
+        if (removeAll) {
+            Models.Marker.USER_WAYPOINTS_PROVIDER.removeAllLocations();
+        }
+
+        double gameX = (mouseX - centerX) / zoomRenderScale + mapCenterX;
+        double gameZ = (mouseY - centerZ) / zoomRenderScale + mapCenterZ;
+        Location compassLocation = Location.containing(gameX, 0, gameZ);
+        Models.Marker.USER_WAYPOINTS_PROVIDER.addLocation(compassLocation, null);
+
+        McUtils.playSoundUI(SoundEvents.EXPERIENCE_ORB_PICKUP);
+    }
+
+    @Override
+    public boolean doMouseClicked(MouseButtonEvent event, boolean isDoubleClick) {
+        for (MapButton mapButton : mapButtons) {
+            if (mapButton.isMouseOver(event.x(), event.y())) {
+                return mapButton.mouseClicked(event, isDoubleClick);
+            }
+        }
+
+        if (!holdingZoomHandle && isMouseOverZoomHandle(event.x(), event.y())) {
+            holdingZoomHandle = true;
+            return true;
+        }
+
+        return super.doMouseClicked(event, isDoubleClick);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (holdingZoomHandle) {
+            updateZoomLevel(event.y());
+            return true;
+        }
+
+        if (event.button() == 0
+                && event.x() >= renderX
+                && event.x() <= renderX + renderWidth
+                && event.y() >= renderY
+                && event.y() <= renderY + renderHeight) {
+            isPanning = event.button() == 0;
+            updateMapCenter(
+                    (float) (mapCenterX - dragX / zoomRenderScale), (float) (mapCenterZ - dragY / zoomRenderScale));
+        }
+
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        isPanning = false;
+        holdingZoomHandle = false;
+
+        return super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
+        adjustZoomLevel((float) (2f * deltaY));
+        return true;
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            this.onClose();
+            return true;
+        }
+        if (event.key() == GLFW.GLFW_KEY_EQUAL || event.key() == GLFW.GLFW_KEY_KP_ADD) {
+            // Take steps of 2 to make it easier to zoom in and out
+            adjustZoomLevel(2);
+            return true;
+        }
+        if (event.key() == GLFW.GLFW_KEY_MINUS || event.key() == GLFW.GLFW_KEY_KP_SUBTRACT) {
+            // Take steps of 2 to make it easier to zoom in and out
+            adjustZoomLevel(-2);
+            return true;
+        }
+
+        // Pass along key press to move
+        InputConstants.Key key = InputConstants.getKey(event);
+        KeyMapping.set(key, true);
+
+        return false;
+    }
+
+    @Override
+    public boolean keyReleased(KeyEvent event) {
+        // Pass along key press to move
+        InputConstants.Key key = InputConstants.getKey(event);
+        KeyMapping.set(key, false);
+
+        return false;
+    }
+
+    @Override
+    public void onClose() {
+        if (previousScreen.isEmpty()) {
+            super.onClose();
+        } else {
+            McUtils.mc().setScreen(previousScreen.get());
+        }
+    }
+
+    protected boolean keyPressedParent(KeyEvent event) {
+        return super.keyPressed(event);
+    }
+
+    protected void renderCoordinates(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        int gameX = (int) ((mouseX - centerX) / zoomRenderScale + mapCenterX);
+        int gameZ = (int) ((mouseY - centerZ) / zoomRenderScale + mapCenterZ);
+
+        FontRenderer.getInstance()
+                .renderText(
+                        guiGraphics,
+                        StyledText.fromString(gameX + ", " + gameZ),
+                        this.centerX,
+                        this.renderHeight - this.renderedBorderYOffset - 40,
+                        CommonColors.WHITE,
+                        HorizontalAlignment.CENTER,
+                        VerticalAlignment.TOP,
+                        TextShadow.OUTLINE);
+    }
+
+    protected void renderZoomText(GuiGraphics guiGraphics) {
+        if (!KeyboardUtils.isShiftDown()) return;
+
+        FontRenderer.getInstance()
+                .renderText(
+                        guiGraphics,
+                        StyledText.fromString("Zoom " + Math.round(zoomLevel)),
+                        renderX + renderedBorderXOffset + mapWidth - 50,
+                        this.renderHeight - this.renderedBorderYOffset - 9,
+                        CommonColors.WHITE,
+                        HorizontalAlignment.CENTER,
+                        VerticalAlignment.TOP,
+                        TextShadow.OUTLINE);
+    }
+
+    protected void renderZoomWidgets(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        RenderUtils.drawScalingTexturedRect(
+                guiGraphics,
+                Texture.ZOOM_BAR,
+                zoomHandleRenderX + 4,
+                renderHeight - renderedBorderYOffset - 2 - 100,
+                4,
+                86);
+
+        zoomHandleRenderY = renderHeight
+                - renderedBorderYOffset
+                - 2
+                - 100
+                + MathUtils.map(zoomLevel, MapRenderer.ZOOM_LEVELS, 0, 0, 87 - Texture.ZOOM_HANDLE.height());
+
+        RenderUtils.drawTexturedRect(guiGraphics, Texture.ZOOM_HANDLE, zoomHandleRenderX, zoomHandleRenderY);
+
+        for (Renderable renderable : this.renderables) {
+            renderable.render(guiGraphics, mouseX, mouseY, partialTicks);
+        }
+    }
+
+    protected void addMapButton(MapButton mapButton) {
+        mapButtons.add(mapButton);
+
+        int totalButtonsWidth = mapButtons.size() * Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width();
+        int buttonBackgroundX = (int) (centerX - (totalButtonsWidth / 2f));
+
+        for (MapButton button : mapButtons) {
+            int backgrounCenterX = buttonBackgroundX + (Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width() / 2);
+            int backgroundCenterY = (int) (this.renderHeight
+                    - this.renderedBorderYOffset
+                    - (Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.height() / 2f));
+
+            button.setX(
+                    backgrounCenterX - ((button.getWidth() + 1) / 2)); // +1 so textures with odd width get rounded up
+            button.setY(backgroundCenterY - (button.getHeight() / 2));
+
+            buttonBackgroundX += Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width();
+        }
+    }
+
+    protected void renderMapButtons(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        int buttonBackgroundX;
+        int buttonBackgroundY =
+                (int) (this.renderHeight - this.renderedBorderYOffset - Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.height());
+
+        if (mapButtons.size() % 2 == 0) {
+            buttonBackgroundX = (int) (centerX - Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width());
+            buttonBackgroundX -= (((mapButtons.size() / 2) - 1) * Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width());
+        } else {
+            buttonBackgroundX = (int) (centerX - Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width() / 2f);
+            buttonBackgroundX -= ((mapButtons.size() / 2) * Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width());
+        }
+
+        for (int i = 0; i < mapButtons.size(); i++) {
+            if (i == 0) {
+                RenderUtils.drawTexturedRect(
+                        guiGraphics,
+                        Texture.MAP_BUTTONS_BACKGROUND_LEFT,
+                        buttonBackgroundX - Texture.MAP_BUTTONS_BACKGROUND_LEFT.width(),
+                        buttonBackgroundY);
+            } else if (i == mapButtons.size() - 1) {
+                RenderUtils.drawTexturedRect(
+                        guiGraphics,
+                        Texture.MAP_BUTTONS_BACKGROUND_RIGHT,
+                        buttonBackgroundX + Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width(),
+                        buttonBackgroundY);
+            }
+
+            RenderUtils.drawTexturedRect(
+                    guiGraphics, Texture.MAP_BUTTONS_BACKGROUND_MIDDLE, buttonBackgroundX, buttonBackgroundY);
+
+            mapButtons.get(i).render(guiGraphics, mouseX, mouseY, partialTicks);
+
+            buttonBackgroundX += Texture.MAP_BUTTONS_BACKGROUND_MIDDLE.width();
+        }
+    }
+
+    protected void renderCursor(
+            GuiGraphics guiGraphics, float pointerScale, CustomColor pointerColor, PointerType pointerType) {
+        double pX = McUtils.player().getX();
+        double pZ = McUtils.player().getZ();
+
+        double distanceX = pX - mapCenterX;
+        double distanceZ = pZ - mapCenterZ;
+
+        float cursorX = (float) (centerX + distanceX * zoomRenderScale);
+        float cursorZ = (float) (centerZ + distanceZ * zoomRenderScale);
+
+        MapRenderer.renderCursor(guiGraphics, cursorX, cursorZ, pointerScale, pointerColor, pointerType, false);
+    }
+
+    protected void renderMap(GuiGraphics guiGraphics) {
+        RenderUtils.enableScissor(
+                guiGraphics,
+                (int) (renderX + renderedBorderXOffset),
+                (int) (renderY + renderedBorderYOffset),
+                (int) mapWidth,
+                (int) mapHeight);
+
+        // Background black void color
+        RenderUtils.drawRect(
+                guiGraphics,
+                CommonColors.BLACK,
+                renderX + renderedBorderXOffset,
+                renderY + renderedBorderYOffset,
+                mapWidth,
+                mapHeight);
+
+        BoundingBox view =
+                BoundingBox.centered(mapCenterX, mapCenterZ, mapWidth / zoomRenderScale, mapHeight / zoomRenderScale);
+
+        for (MapTexture map : Services.Map.getMapsForBoundingBox(view)) {
+            MapRenderer.renderMapTile(
+                    guiGraphics, map, mapCenterX, mapCenterZ, centerX, centerZ, zoomRenderScale, view);
+        }
+
+        RenderUtils.disableScissor(guiGraphics);
+    }
+
+    protected void renderChunkBorders(GuiGraphics guiGraphics) {
+        BoundingBox textureBoundingBox =
+                BoundingBox.centered(mapCenterX, mapCenterZ, width / zoomRenderScale, height / zoomRenderScale);
+
+        // If the user is holding shift, only render close-by pois
+        float pX = (float) McUtils.player().getX();
+        float pZ = (float) McUtils.player().getZ();
+
+        BoundingBox chunkBoundingBox = KeyboardUtils.isShiftDown()
+                ? textureBoundingBox
+                : BoundingBox.centered(
+                        pX,
+                        pZ,
+                        McUtils.options().renderDistance().get() * 16,
+                        McUtils.options().renderDistance().get() * 16);
+
+        Set<Long> mappedChunks = Managers.Feature.getFeatureInstance(MappingProgressFeature.class)
+                .getMappedChunks();
+
+        MapRenderer.renderChunks(
+                guiGraphics, chunkBoundingBox, mappedChunks, mapCenterX, centerX, mapCenterZ, centerZ, zoomRenderScale);
+    }
+
+    protected void centerMapAroundPlayer() {
+        updateMapCenter(
+                (float) McUtils.player().getX(), (float) McUtils.player().getZ());
+    }
+
+    protected void centerMapOnWorld() {
+        if (!shouldCenterMap) return;
+
+        updateMapCenter(MAP_CENTER_X, MAP_CENTER_Z);
+        setZoomLevel(CENTER_ZOOM_LEVEL);
+    }
+
+    protected boolean isPlayerInsideMainArea() {
+        return MathUtils.isInside(
+                (int) McUtils.player().getX(), (int) McUtils.player().getZ(), MIN_X, MAX_X, MIN_Z, MAX_Z);
+    }
+
+    protected boolean isMouseOverZoomHandle(double mouseX, double mouseY) {
+        return MathUtils.isInside(
+                (int) mouseX,
+                (int) mouseY,
+                (int) zoomHandleRenderX,
+                (int) (zoomHandleRenderX + Texture.ZOOM_HANDLE.width()),
+                (int) zoomHandleRenderY,
+                (int) (zoomHandleRenderY + Texture.ZOOM_HANDLE.height()));
+    }
+
+    protected void updateZoomLevel(double mouseY) {
+        int scrollAreaStartY = (int) (this.renderHeight - renderedBorderYOffset - 2 - 100);
+
+        int newZoom = Math.round(MathUtils.map(
+                (float) mouseY,
+                scrollAreaStartY,
+                scrollAreaStartY + 87 - Texture.ZOOM_HANDLE.height(),
+                MapRenderer.ZOOM_LEVELS,
+                0));
+
+        setZoomLevel(newZoom);
+    }
+
+    protected void setZoomLevel(float zoomLevel) {
+        this.zoomLevel = MathUtils.clamp(zoomLevel, 1, MapRenderer.ZOOM_LEVELS);
+        // Recalculate the cached zoom render scale
+        this.zoomRenderScale = MapRenderer.getZoomRenderScaleFromLevel(this.zoomLevel);
+    }
+
+    private void adjustZoomLevel(float delta) {
+        setZoomLevel(zoomLevel + delta);
+    }
+
+    protected void updateMapCenter(float newX, float newZ) {
+        this.mapCenterX = newX;
+        this.mapCenterZ = newZ;
+    }
+
+    public void setHoldingMapKey(boolean holdingMapKey) {
+        this.holdingMapKey = holdingMapKey;
+    }
+}

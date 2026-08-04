@@ -1,0 +1,180 @@
+/*
+ * Copyright © Wynntils 2024-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.features.ui;
+
+import com.wynntils.core.components.Handlers;
+import com.wynntils.core.components.Models;
+import com.wynntils.core.consumers.features.Feature;
+import com.wynntils.core.consumers.features.ProfileDefault;
+import com.wynntils.core.consumers.features.properties.RegisterKeyBind;
+import com.wynntils.core.keybinds.KeyBind;
+import com.wynntils.core.keybinds.KeyBindDefinition;
+import com.wynntils.core.persisted.Persisted;
+import com.wynntils.core.persisted.config.Category;
+import com.wynntils.core.persisted.config.Config;
+import com.wynntils.core.persisted.config.ConfigCategory;
+import com.wynntils.core.persisted.config.ConfigProfile;
+import com.wynntils.core.persisted.storage.Storage;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.wrappedscreen.event.WrappedScreenOpenEvent;
+import com.wynntils.mc.event.ContainerClickEvent;
+import com.wynntils.mc.event.MenuEvent;
+import com.wynntils.mc.event.ScreenClosedEvent;
+import com.wynntils.mc.event.ScreenInitEvent;
+import com.wynntils.models.containers.Container;
+import com.wynntils.models.containers.containers.CharacterInfoContainer;
+import com.wynntils.models.containers.containers.GuildManagementContainer;
+import com.wynntils.models.containers.containers.GuildTerritoriesContainer;
+import com.wynntils.screens.territorymanagement.TerritoryManagementScreen;
+import com.wynntils.utils.mc.KeyboardUtils;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.type.ShiftBehavior;
+import com.wynntils.utils.wynn.ContainerUtils;
+import com.wynntils.utils.wynn.InventoryUtils;
+import java.util.regex.Pattern;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.bus.api.SubscribeEvent;
+
+@ConfigCategory(Category.UI)
+public class CustomTerritoryManagementScreenFeature extends Feature {
+    private static final Pattern TERRITORY_MANAGE_ITEM_PATTERN = Pattern.compile("§e§lTerritories \\[.+\\]");
+    private static final Pattern MANAGE_TITLE_PATTERN = Pattern.compile(".+: Manage");
+    private static final Pattern BACK_BUTTON_PATTERN = Pattern.compile("§7§lBack");
+    private static final int COMPASS_INVENTORY_SLOT = 42;
+    private static final int GUILD_MANAGEMENT_SLOT = 26;
+    private static final int TERRITORY_MANAGEMENT_SLOT = 14;
+
+    @RegisterKeyBind
+    private final KeyBind openTerritoryMenu = KeyBindDefinition.OPEN_TERRITORY_MENU.create(this::updateTerritoryMenu);
+
+    @Persisted
+    private final Config<ShiftBehavior> shiftBehaviorConfig = new Config<>(ShiftBehavior.DISABLED_IF_SHIFT_HELD);
+
+    @Persisted
+    private final Config<Boolean> useTerritoryMap = new Config<>(true);
+
+    @Persisted
+    public final Storage<Boolean> screenHighlightLegend = new Storage<>(true);
+
+    @Persisted
+    public final Storage<Boolean> screenTerritoryProductionTooltip = new Storage<>(true);
+
+    private boolean shiftClickedTerritoryItem = false;
+
+    private boolean customScreenOpened = false;
+    private boolean openTerritoryManagement = false;
+
+    public CustomTerritoryManagementScreenFeature() {
+        super(new ProfileDefault.Builder()
+                .enabledFor(ConfigProfile.DEFAULT, ConfigProfile.LITE)
+                .build());
+    }
+
+    @SubscribeEvent
+    public void onWrappedScreenOpen(WrappedScreenOpenEvent event) {
+        if (event.getWrappedScreenClass() != TerritoryManagementScreen.class) return;
+
+        boolean shouldOpen = false;
+
+        switch (shiftBehaviorConfig.get()) {
+            case NONE -> {
+                shouldOpen = true;
+            }
+            case ENABLED_IF_SHIFT_HELD -> {
+                if (shiftClickedTerritoryItem) {
+                    shouldOpen = true;
+                }
+            }
+            case DISABLED_IF_SHIFT_HELD -> {
+                if (!shiftClickedTerritoryItem) {
+                    shouldOpen = true;
+                }
+            }
+        }
+
+        if (shouldOpen) {
+            event.setOpenScreen(true);
+            customScreenOpened = true;
+        }
+    }
+
+    @SubscribeEvent
+    public void onScreenClosed(ScreenClosedEvent.Post event) {
+        // Reset the flag when the screen is closed
+        customScreenOpened = false;
+        openTerritoryManagement = false;
+    }
+
+    @SubscribeEvent
+    public void onScreenInit(ScreenInitEvent.Pre event) {
+        if (StyledText.fromComponent(event.getScreen().getTitle()).matches(MANAGE_TITLE_PATTERN)) {
+            // We might have opened a different screen,
+            // but ScreenClosedEvent did not fire (as the screen was overridden).
+            customScreenOpened = false;
+        }
+
+        if (event.getScreen() instanceof TerritoryManagementScreen territoryManagementScreen) {
+            territoryManagementScreen.setMapMode(useTerritoryMap.get());
+        }
+    }
+
+    @SubscribeEvent
+    public void onContainerClick(ContainerClickEvent event) {
+        if (StyledText.fromComponent(event.getItemStack().getHoverName()).matches(TERRITORY_MANAGE_ITEM_PATTERN)) {
+            shiftClickedTerritoryItem = KeyboardUtils.isShiftDown();
+            return;
+        }
+
+        if (!customScreenOpened) return;
+        if (Models.Container.getCurrentContainer() instanceof GuildTerritoriesContainer) return;
+
+        ItemStack itemStack = event.getItemStack();
+        StyledText itemName = StyledText.fromComponent(itemStack.getHoverName());
+
+        if (itemName.matches(BACK_BUTTON_PATTERN)) {
+            // We clicked the back button,
+            // but we want to arrive at the territory management screen,
+            // not the guild management screen. So, we click the corresponding item.
+            openTerritoryManagement = true;
+        }
+    }
+
+    @SubscribeEvent
+    public void onMenuOpenPre(MenuEvent.MenuOpenedEvent.Pre event) {
+        if (!openTerritoryManagement) return;
+
+        openTerritoryManagement = false;
+
+        Container container = Models.Container.getCurrentContainer();
+        if (container instanceof GuildManagementContainer) {
+            event.setCanceled(true);
+
+            AbstractContainerMenu containerMenu =
+                    event.getMenuType().create(event.getContainerId(), McUtils.inventory());
+            ContainerUtils.clickOnSlot(TERRITORY_MANAGEMENT_SLOT, event.getContainerId(), 0, containerMenu.getItems());
+        } else if (container instanceof CharacterInfoContainer) {
+            event.setCanceled(true);
+
+            // We still need to do a second click to open the territory management screen
+            openTerritoryManagement = true;
+
+            AbstractContainerMenu containerMenu =
+                    event.getMenuType().create(event.getContainerId(), McUtils.inventory());
+            ContainerUtils.clickOnSlot(GUILD_MANAGEMENT_SLOT, event.getContainerId(), 0, containerMenu.getItems());
+        }
+    }
+
+    private void updateTerritoryMenu() {
+        openTerritoryManagement = true;
+
+        if (Models.War.isWarActive()) {
+            InventoryUtils.sendInventorySlotMouseClick(
+                    COMPASS_INVENTORY_SLOT, InventoryUtils.MouseClickType.LEFT_CLICK);
+        } else {
+            Handlers.Command.sendCommandImmediately("guild manage");
+        }
+    }
+}

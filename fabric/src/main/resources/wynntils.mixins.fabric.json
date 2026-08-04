@@ -1,0 +1,16 @@
+{
+  "client": [
+    "FabricAbstractContainerScreenMixin",
+    "FabricGuiMixin",
+    "FabricGuiGraphicsMixin"
+  ],
+  "compatibilityLevel": "JAVA_21",
+  "injected_interfaces": {},
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "minVersion": "0.8.5",
+  "mixins": [],
+  "package": "com.wynntils.fabric.mixins",
+  "required": true
+}

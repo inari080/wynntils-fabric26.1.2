@@ -1,0 +1,19 @@
+plugins {
+    id "java-library"
+}
+
+dependencies {
+    // We depend on fabric loader here only to use the fabric @Environment annotation and
+    // net.fabricmc.loader.api classes at compile time. Do NOT use other classes from fabric loader.
+    // Plain (non-"mod") dependency: this is a plain jar, not something Loom needs to remap.
+    compileOnly "net.fabricmc:fabric-loader:${fabric_loader_version}"
+
+    if (file("${rootDir}/../Hades/build/libs/HadesProtocol-${hades_version}.jar").exists()) {
+        implementation(files("${rootDir}/../Hades/build/libs/HadesProtocol-${hades_version}.jar"))
+    } else {
+        implementation("com.github.wynntils:hades:v${hades_version}")
+    }
+    implementation("com.github.wynntils:antiope:v${antiope_version}")
+
+    implementation(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixinextras_version}"))
+}

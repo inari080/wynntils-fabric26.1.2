@@ -1,0 +1,37 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.models.items.annotators.game;
+
+import com.wynntils.core.WynntilsMod;
+import com.wynntils.core.components.Models;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.item.GameItemAnnotator;
+import com.wynntils.handlers.item.ItemAnnotation;
+import com.wynntils.models.gear.type.GearInfo;
+import java.util.regex.Matcher;
+import net.minecraft.world.item.ItemStack;
+
+public final class GearAnnotator implements GameItemAnnotator {
+    @Override
+    public ItemAnnotation getAnnotation(ItemStack itemStack, StyledText name) {
+        Matcher matcher = name.getMatcher(Models.Gear.GEAR_PATTERN);
+        if (!matcher.matches()) return null;
+
+        // Lookup Gear Profile
+        String itemName = matcher.group("name");
+        GearInfo gearInfo = Models.Gear.getGearInfoFromDisplayName(itemName);
+        if (gearInfo == null) return null;
+
+        String rarity = matcher.group("rarity");
+
+        // We have no rarity information, so we can't determine if the item is gear
+        if (rarity == null) {
+            WynntilsMod.warn("GearAnnotator: No rarity information found in item name: " + name);
+            return null;
+        }
+
+        return Models.Gear.parseInstance(gearInfo, itemStack, matcher.group("unidentified") != null);
+    }
+}

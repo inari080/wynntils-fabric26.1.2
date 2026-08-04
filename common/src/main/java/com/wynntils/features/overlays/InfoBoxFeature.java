@@ -1,0 +1,24 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.features.overlays;
+
+import com.wynntils.core.consumers.features.Feature;
+import com.wynntils.core.consumers.features.ProfileDefault;
+import com.wynntils.core.consumers.overlays.annotations.OverlayGroup;
+import com.wynntils.core.persisted.config.Category;
+import com.wynntils.core.persisted.config.ConfigCategory;
+import com.wynntils.overlays.infobox.InfoBoxOverlay;
+import java.util.ArrayList;
+import java.util.List;
+
+@ConfigCategory(Category.OVERLAYS)
+public class InfoBoxFeature extends Feature {
+    @OverlayGroup(instances = 7)
+    private final List<InfoBoxOverlay> infoBoxOverlays = new ArrayList<>();
+
+    public InfoBoxFeature() {
+        super(ProfileDefault.ENABLED);
+    }
+}

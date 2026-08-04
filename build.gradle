@@ -1,0 +1,45 @@
+plugins {
+    id "com.diffplug.spotless" version "${spotless_version}"
+}
+
+// On the release branches, this string will be automatically updated by the bots
+// Do not change this in the main branch!
+version = "4.2.6"
+
+allprojects {
+    apply plugin: "java"
+    apply plugin: "com.diffplug.spotless"
+
+    version = rootProject.version
+    group = "com.wynntils"
+
+    repositories {
+        mavenCentral()
+        maven { url "https://maven.parchmentmc.org/" } // kept for transitive compat, safe to remove if unused
+        maven { url "https://jitpack.io" }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = "UTF-8"
+    }
+
+    java {
+        toolchain {
+            // Minecraft 26.1.x requires Java 25 as the minimum Gradle/compile JVM.
+            languageVersion.set(JavaLanguageVersion.of(java_version))
+        }
+        withSourcesJar()
+    }
+
+    spotless {
+        java {
+            target("src/*/java/**/*.java")
+            palantirJavaFormat()
+            formatAnnotations()
+            importOrder()
+            removeUnusedImports()
+            endWithNewline()
+            trimTrailingWhitespace()
+        }
+    }
+}

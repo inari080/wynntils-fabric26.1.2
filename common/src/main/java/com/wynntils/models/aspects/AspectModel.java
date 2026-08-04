@@ -1,0 +1,280 @@
+/*
+ * Copyright © Wynntils 2025-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.models.aspects;
+
+import com.wynntils.core.WynntilsMod;
+import com.wynntils.core.components.Managers;
+import com.wynntils.core.components.Model;
+import com.wynntils.core.components.Models;
+import com.wynntils.core.components.Services;
+import com.wynntils.core.net.DownloadRegistry;
+import com.wynntils.core.persisted.Persisted;
+import com.wynntils.core.persisted.storage.Storage;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.item.ItemAnnotation;
+import com.wynntils.mc.event.ContainerSetContentEvent;
+import com.wynntils.mc.event.ContainerSetSlotEvent;
+import com.wynntils.models.aspects.type.AspectInfo;
+import com.wynntils.models.aspects.type.SavableAspectSet;
+import com.wynntils.models.character.type.ClassType;
+import com.wynntils.models.containers.Container;
+import com.wynntils.models.containers.containers.AspectsContainer;
+import com.wynntils.models.containers.containers.RaidRewardChestContainer;
+import com.wynntils.models.containers.containers.RaidRewardPreviewContainer;
+import com.wynntils.models.items.items.game.AspectItem;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.wynn.ContainerUtils;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
+
+public final class AspectModel extends Model {
+    private static final Pattern NO_ASPECT_PATTERN = Pattern.compile("§8§l(?:Empty|Locked) Aspect Slot");
+    private final AspectInfoRegistry aspectInfoRegistry = new AspectInfoRegistry();
+    public static final AspectContainerQueries ASPECT_CONTAINER_QUERIES = new AspectContainerQueries();
+
+    @Persisted
+    private final Storage<Map<String, List<String>>> equippedAspects = new Storage<>(new TreeMap<>());
+
+    @Persisted
+    private final Storage<Map<String, Integer>> ownedAspects = new Storage<>(new TreeMap<>());
+
+    public AspectModel() {
+        super(List.of());
+    }
+
+    @Override
+    public void registerDownloads(DownloadRegistry registry) {
+        aspectInfoRegistry.registerDownloads(registry);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onContentSet(ContainerSetContentEvent.Pre event) {
+        Container currentContainer = Models.Container.getCurrentContainer();
+
+        List<Integer> equippedSlots = new ArrayList<>();
+        if (currentContainer instanceof AspectsContainer aspectsContainer) {
+            equippedSlots = new ArrayList<>(aspectsContainer.getEquippedSlots());
+        }
+
+        List<Integer> ownedSlots = getOwnedSlotsFromContainer(currentContainer);
+
+        if (ownedSlots.isEmpty()) return;
+
+        List<String> characterEquippedAspects = new ArrayList<>();
+        Map<String, Integer> newOwnedAspects = ownedAspects.get();
+
+        for (int i = 0; i < event.getItems().size(); i++) {
+            boolean owned = ownedSlots.contains(i);
+            boolean equipped = equippedSlots.contains(i);
+
+            if (!equipped && !owned) continue;
+
+            ItemStack itemStack = event.getItems().get(i);
+            if (itemStack.isEmpty()) continue;
+
+            if (equipped) {
+                StyledText itemName = StyledText.fromComponent(itemStack.getHoverName());
+                if (itemName.matches(NO_ASPECT_PATTERN)) continue;
+            }
+
+            Optional<AspectItem> aspectItemOpt = Models.Item.asWynnItem(itemStack, AspectItem.class);
+
+            if (aspectItemOpt.isEmpty()) continue;
+
+            newOwnedAspects.put(
+                    aspectItemOpt.get().getName(), aspectItemOpt.get().getTier());
+
+            if (equipped) {
+                characterEquippedAspects.add(aspectItemOpt.get().getName());
+            }
+        }
+
+        if (!equippedSlots.isEmpty()) {
+            Map<String, List<String>> currentEquippedAspects = equippedAspects.get();
+            currentEquippedAspects.put(Models.Character.getId(), characterEquippedAspects);
+            equippedAspects.store(currentEquippedAspects);
+            equippedAspects.touched();
+        }
+
+        ownedAspects.store(newOwnedAspects);
+        ownedAspects.touched();
+    }
+
+    // Handles right clicking adding/removing aspects, and paging through owned aspects
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onContainerSetSlot(ContainerSetSlotEvent.Pre event) {
+        Container currentContainer = Models.Container.getCurrentContainer();
+
+        List<Integer> equippedSlots = currentContainer instanceof AspectsContainer aspectsContainer
+                ? new ArrayList<>(aspectsContainer.getEquippedSlots())
+                : new ArrayList<>();
+
+        List<Integer> ownedSlots = getOwnedSlotsFromContainer(currentContainer);
+
+        int changedSlot = event.getSlot();
+        boolean changedSlotIsOwned = ownedSlots.contains(changedSlot);
+        boolean changedSlotIsEquipped = equippedSlots.contains(changedSlot);
+
+        if (!changedSlotIsOwned && !changedSlotIsEquipped) return;
+
+        ItemStack changedItemStack = event.getItemStack();
+
+        if (changedSlotIsOwned && !changedItemStack.isEmpty()) {
+            Optional<AspectItem> aspectItemOpt = Models.Item.asWynnItem(changedItemStack, AspectItem.class);
+
+            if (aspectItemOpt.isPresent()) {
+                Map<String, Integer> newOwnedAspects = ownedAspects.get();
+                newOwnedAspects.put(
+                        aspectItemOpt.get().getName(), aspectItemOpt.get().getTier());
+                ownedAspects.store(newOwnedAspects);
+                ownedAspects.touched();
+            }
+        }
+
+        if (changedSlotIsEquipped) {
+            List<String> characterAspects = new ArrayList<>();
+
+            McUtils.mc().player.containerMenu.slots.forEach(slot -> {
+                if (!equippedSlots.contains(slot.index)) return;
+
+                ItemStack itemStack = slot.index == changedSlot ? changedItemStack : slot.getItem();
+                if (itemStack.isEmpty()) return;
+
+                StyledText itemName = StyledText.fromComponent(itemStack.getHoverName());
+                if (itemName.matches(NO_ASPECT_PATTERN)) return;
+
+                Optional<AspectItem> aspectItemOpt = Models.Item.asWynnItem(itemStack, AspectItem.class);
+
+                if (aspectItemOpt.isEmpty()) return;
+
+                characterAspects.add(aspectItemOpt.get().getName());
+            });
+
+            Map<String, List<String>> currentEquippedAspects = equippedAspects.get();
+            currentEquippedAspects.put(Models.Character.getId(), characterAspects);
+            equippedAspects.store(currentEquippedAspects);
+            equippedAspects.touched();
+        }
+    }
+
+    public Stream<AspectInfo> getAllAspectInfos() {
+        return aspectInfoRegistry.getAllAspectInfos();
+    }
+
+    public AspectInfo getAspectInfo(String aspectName) {
+        return aspectInfoRegistry.getFromDisplayName(aspectName);
+    }
+
+    public Optional<String> getEquippedAspect(int index) {
+        List<String> characterAspects = equippedAspects.get().getOrDefault(Models.Character.getId(), new ArrayList<>());
+
+        if (index < 0 || index >= characterAspects.size()) return Optional.empty();
+
+        return Optional.of(characterAspects.get(index));
+    }
+
+    public Optional<String> getEquippedAspectByName(String aspectName) {
+        List<String> characterAspects = equippedAspects.get().getOrDefault(Models.Character.getId(), new ArrayList<>());
+
+        return characterAspects.stream()
+                .filter(aspect -> aspect.toLowerCase(Locale.ROOT).endsWith(aspectName.toLowerCase(Locale.ROOT)))
+                .findFirst();
+    }
+
+    public Optional<Integer> getAspectTierByName(String aspectName) {
+        return ownedAspects.get().entrySet().stream()
+                .filter(entry -> entry.getKey().toLowerCase(Locale.ROOT).endsWith(aspectName.toLowerCase(Locale.ROOT)))
+                .map(Map.Entry::getValue)
+                .findFirst();
+    }
+
+    public ItemAnnotation fromNameAndClass(StyledText name, ClassType classType, int tier) {
+        AspectInfo aspectInfo =
+                aspectInfoRegistry.getFromClassAndDisplayName(classType, name.getStringWithoutFormatting());
+
+        if (aspectInfo == null) {
+            WynntilsMod.warn("Could not find aspect info for " + name.getStringWithoutFormatting());
+            return null;
+        }
+
+        return new AspectItem(aspectInfo, tier);
+    }
+
+    private List<Integer> getOwnedSlotsFromContainer(Container container) {
+        if (container instanceof AspectsContainer aspectsContainer) {
+            return aspectsContainer.getAspectBounds().getSlots();
+        } else if (container instanceof RaidRewardChestContainer rewardChestContainer) {
+            return rewardChestContainer.getAspectBounds().getSlots();
+        } else if (container instanceof RaidRewardPreviewContainer rewardPreviewContainer) {
+            return rewardPreviewContainer.getRewardBounds().getSlots();
+        }
+
+        return List.of();
+    }
+
+    public void clearEquippedAspectsAndRescan(
+            Consumer<String> onStatus, Consumer<String> onError, Consumer<String> onComplete) {
+        Map<String, List<String>> currentEquippedAspects = equippedAspects.get();
+        currentEquippedAspects.put(Models.Character.getId(), new ArrayList<>());
+        equippedAspects.store(currentEquippedAspects);
+        equippedAspects.touched();
+
+        ownedAspects.store(new TreeMap<>());
+        ownedAspects.touched();
+
+        McUtils.player().closeContainer();
+
+        Managers.TickScheduler.scheduleNextTick(
+                () -> ASPECT_CONTAINER_QUERIES.scanAspectPages(onStatus, onError, onComplete));
+    }
+
+    public void saveCurrentAspectLoadout(
+            String name, Consumer<String> onStatus, Consumer<String> onError, Consumer<String> onComplete) {
+        ASPECT_CONTAINER_QUERIES.dumpAspectContainer(
+                loadout -> {
+                    Services.loadout.saveAspectLoadout(name, loadout);
+                    WynntilsMod.info("Saved aspect loadout: " + name);
+                },
+                onStatus,
+                onError,
+                onComplete);
+    }
+
+    public void loadAspectLoadout(
+            String name, Consumer<String> onStatus, Consumer<String> onError, Consumer<String> onComplete) {
+        SavableAspectSet loadout = Services.loadout.getAspectLoadout(name);
+        if (loadout == null) {
+            onError.accept("No saved aspect loadout: " + name);
+            return;
+        }
+
+        ClassType currentClass = Models.Character.getClassType();
+        if (loadout.classType() != null && loadout.classType() != currentClass && currentClass != ClassType.NONE) {
+            onError.accept("Loadout " + name + " is for " + loadout.classType().getName() + ", but you are "
+                    + currentClass.getName());
+            return;
+        }
+
+        if (loadout.aspectNames().isEmpty()) {
+            onComplete.accept("Loadout " + name + " is empty, nothing to apply");
+            return;
+        }
+
+        // Close any open background container before starting the query
+        ContainerUtils.closeBackgroundContainer();
+
+        ASPECT_CONTAINER_QUERIES.applyAspectLoadout(loadout.aspectNames(), onStatus, onError, onComplete);
+    }
+}

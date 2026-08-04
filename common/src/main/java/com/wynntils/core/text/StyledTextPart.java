@@ -1,0 +1,564 @@
+/*
+ * Copyright © Wynntils 2023-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.core.text;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.mojang.authlib.GameProfile;
+import com.wynntils.core.text.type.StyleType;
+import com.wynntils.utils.colors.CustomColor;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.wynn.WynnUtils;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Function;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.component.ResolvableProfile;
+
+public final class StyledTextPart {
+    private final String text;
+    private final PartStyle style;
+
+    private final StyledText parent;
+
+    public StyledTextPart(String text, Style style, StyledText parent, Style parentStyle) {
+        this.parent = parent;
+        this.text = text;
+
+        // Must be done last
+        this.style = PartStyle.fromStyle(style, this, parentStyle);
+    }
+
+    StyledTextPart(StyledTextPart part, StyledText parent) {
+        this.text = part.text;
+        this.style = new PartStyle(part.style, this);
+        this.parent = parent;
+    }
+
+    private StyledTextPart(StyledTextPart part, PartStyle style, StyledText parent) {
+        this.text = part.text;
+        this.style = style;
+        this.parent = parent;
+    }
+
+    // This factory is used to create a StyledTextPart from a component that has formatting codes
+    // It is separate from the constructor because this only needs to be applied in cases there the text could have
+    // formatting codes
+    static List<StyledTextPart> fromCodedString(String codedString, Style style, StyledText parent, Style parentStyle) {
+        // When we have a style, but the text has formatting codes,
+        // we need to apply the formatting codes to the style
+        // This means that the actual style applies first; then the formatting codes
+        List<StyledTextPart> parts = new ArrayList<>();
+
+        Style currentStyle = style;
+        // Preserve inherited font across color code resets
+        Style inheritedStyle = parentStyle == null ? style : style.applyTo(parentStyle);
+        FontDescription inheritedFont = inheritedStyle.getFont();
+        StringBuilder currentString = new StringBuilder();
+
+        boolean nextIsFormatting = false;
+        StringBuilder hexColorFormatting = new StringBuilder();
+
+        // []
+        boolean clickEventPrefix = false;
+        // <>
+        boolean hoverEventPrefix = false;
+        // {}
+        boolean specialPrefix = false;
+        StringBuilder specialString = new StringBuilder();
+
+        String eventIndexString = "";
+
+        for (char current : codedString.toCharArray()) {
+            if (nextIsFormatting) {
+                nextIsFormatting = false;
+
+                // Only parse events, if we have a parent
+                if (parent != null) {
+                    if (current == '[') {
+                        clickEventPrefix = true;
+                        continue;
+                    }
+                    if (current == '<') {
+                        hoverEventPrefix = true;
+                        continue;
+                    }
+                }
+
+                if (current == '{') {
+                    specialPrefix = true;
+                    continue;
+                }
+                // It looks like we have a hex color code
+                if (current == '#') {
+                    hexColorFormatting.append(current);
+                    continue;
+                }
+
+                ChatFormatting formatting = ChatFormatting.getByCode(current);
+
+                if (formatting == null) {
+                    currentString.append(ChatFormatting.PREFIX_CODE);
+                    currentString.append(current);
+                    continue;
+                }
+
+                // If we already had some text with the current style
+                // Append it before modifying the style
+                if (!currentString.isEmpty()) {
+                    if (style != Style.EMPTY) {
+                        // We might have lost an event, so we need to add it back
+                        currentStyle = currentStyle
+                                .withClickEvent(style.getClickEvent())
+                                .withHoverEvent(style.getHoverEvent());
+                    }
+                    // But if the style is empty, we might have parsed events from the string itself
+
+                    parts.add(new StyledTextPart(currentString.toString(), currentStyle, null, parentStyle));
+
+                    // reset string
+                    // style is not reset, because we want to keep the formatting
+                    currentString = new StringBuilder();
+                }
+
+                // Color formatting resets the style
+                if (formatting.isColor()) {
+                    currentStyle = Style.EMPTY.withColor(formatting);
+
+                    // But we keep the inherited font
+                    if (inheritedFont != null) {
+                        currentStyle = currentStyle.withFont(inheritedFont);
+                    }
+                } else {
+                    currentStyle = currentStyle.applyFormat(formatting);
+                }
+                continue;
+            }
+
+            if (specialPrefix) {
+                if (current != '}') {
+                    // Keep appending until we find the closing bracket
+                    specialString.append(current);
+                    continue;
+                } else {
+                    // We currently do not have any special formatting
+                    // But this is a placeholder for future features
+                    specialPrefix = false;
+                    String special = specialString.toString();
+                    specialString = new StringBuilder();
+                    if (special.startsWith("fr:") || special.startsWith("fas:") || special.startsWith("fps:")) {
+                        // If we already had some text with the current style
+                        // Append it before modifying the style
+                        if (!currentString.isEmpty()) {
+                            if (style != Style.EMPTY) {
+                                // We might have lost an event, so we need to add it back
+                                currentStyle = currentStyle
+                                        .withClickEvent(style.getClickEvent())
+                                        .withHoverEvent(style.getHoverEvent());
+                            }
+                            // But if the style is empty, we might have parsed events from the string itself
+
+                            parts.add(new StyledTextPart(currentString.toString(), currentStyle, null, parentStyle));
+
+                            // reset string
+                            // style is not reset, because we want to keep the formatting
+                            currentString = new StringBuilder();
+                        }
+
+                        FontDescription fontDescription = null;
+
+                        if (special.startsWith("fr:")) {
+                            String fontCode = special.substring(3);
+                            fontDescription = FontLookup.getFontFromFromFontCode(fontCode);
+                        } else if (special.startsWith("fas:")) {
+                            String identifiers = special.substring(4);
+                            String[] split = identifiers.split(";");
+
+                            if (split.length != 2) continue;
+
+                            fontDescription = new FontDescription.AtlasSprite(
+                                    Identifier.parse(split[0]), Identifier.parse(split[1]));
+                        } else if (special.startsWith("fps:")) {
+                            String profileDetails = special.substring(4);
+                            String[] split = profileDetails.split(";");
+
+                            if (split.length != 2) continue;
+
+                            UUID id = UUID.fromString(split[0]);
+                            Optional<GameProfile> optional =
+                                    McUtils.mc().services().profileResolver().fetchById(id);
+
+                            if (optional.isPresent()) {
+                                ResolvableProfile resolved = ResolvableProfile.createResolved(optional.get());
+
+                                fontDescription =
+                                        new FontDescription.PlayerSprite(resolved, Boolean.parseBoolean(split[1]));
+                            }
+                        }
+
+                        if (fontDescription != null) {
+                            currentStyle = currentStyle.withFont(fontDescription);
+                        }
+                    } else if (special.startsWith("sc:")) {
+                        // If we already had some text with the current style
+                        // Append it before modifying the style
+                        if (!currentString.isEmpty()) {
+                            if (style != Style.EMPTY) {
+                                // We might have lost an event, so we need to add it back
+                                currentStyle = currentStyle
+                                        .withClickEvent(style.getClickEvent())
+                                        .withHoverEvent(style.getHoverEvent());
+                            }
+                            // But if the style is empty, we might have parsed events from the string itself
+
+                            parts.add(new StyledTextPart(currentString.toString(), currentStyle, null, parentStyle));
+
+                            // reset string
+                            // style is not reset, because we want to keep the formatting
+                            currentString = new StringBuilder();
+                        }
+
+                        CustomColor shadowColor = CustomColor.fromHexString(special.substring(3));
+                        currentStyle = currentStyle.withShadowColor(shadowColor.asInt());
+                    } else {
+                        // Unknown special code, just ignore it for now
+                    }
+                    continue;
+                }
+            }
+
+            // If we are parsing an event, handle it
+            if (clickEventPrefix || hoverEventPrefix) {
+                if (Character.isDigit(current)) {
+                    eventIndexString += current;
+                    continue;
+                }
+
+                // This is set to true if we have overwritten the current style's event
+                Style oldStyle = null;
+
+                if (clickEventPrefix && current == ']') {
+                    ClickEvent clickEvent = parent.getClickEvent(Integer.parseInt(eventIndexString));
+
+                    if (clickEvent != null) {
+                        oldStyle = currentStyle;
+
+                        currentStyle = currentStyle.withClickEvent(clickEvent);
+                        clickEventPrefix = false;
+                        eventIndexString = "";
+                    }
+                }
+
+                if (hoverEventPrefix && current == '>') {
+                    HoverEvent hoverEvent = parent.getHoverEvent(Integer.parseInt(eventIndexString));
+
+                    if (hoverEvent != null) {
+                        oldStyle = currentStyle;
+
+                        currentStyle = currentStyle.withHoverEvent(hoverEvent);
+                        hoverEventPrefix = false;
+                        eventIndexString = "";
+                    }
+                }
+
+                if (oldStyle != null) {
+                    // If we already had some text with the current style
+                    // Append it before modifying the style
+                    if (!currentString.isEmpty()) {
+                        if (style != Style.EMPTY) {
+                            // We might have lost an event, so we need to add it back
+                            // (theoretically this case can't happen at this location)
+                            currentStyle = currentStyle
+                                    .withClickEvent(style.getClickEvent())
+                                    .withHoverEvent(style.getHoverEvent());
+                        }
+                        // But if the style is empty, we might have parsed events from the string itself
+
+                        parts.add(new StyledTextPart(currentString.toString(), oldStyle, null, parentStyle));
+
+                        // reset string
+                        // style is not reset, because we want to keep the formatting
+                        currentString = new StringBuilder();
+                    }
+
+                    // Even if we did not add a new part, we've parsed an event
+                    continue;
+                }
+
+                // The event was not formatted properly, so add it as a string
+                currentString.append(clickEventPrefix ? '[' : '<');
+                currentString.append(eventIndexString);
+                currentString.append(current);
+
+                // Reset the related variables
+                clickEventPrefix = false;
+                hoverEventPrefix = false;
+                eventIndexString = "";
+                continue;
+            }
+
+            if (!hexColorFormatting.isEmpty()) {
+                hexColorFormatting.append(current);
+
+                // StyledText#getString() always uses full hex representation,
+                // if the color is not a ChatFormatting color (#rrggbbaa)
+                if (hexColorFormatting.length() == 9) {
+                    CustomColor customColor = CustomColor.fromHexString(hexColorFormatting.toString());
+
+                    // If the color is invalid, we just append the hex formatting as text
+                    if (customColor == CustomColor.NONE) {
+                        currentString.append(hexColorFormatting);
+                    } else if (!currentString.isEmpty()) {
+                        // If we already had some text with the current style
+                        // Append it before modifying the style
+                        if (style != Style.EMPTY) {
+                            // We might have lost an event, so we need to add it back
+                            currentStyle = currentStyle
+                                    .withClickEvent(style.getClickEvent())
+                                    .withHoverEvent(style.getHoverEvent());
+                        }
+                        // But if the style is empty, we might have parsed events from the string itself
+
+                        parts.add(new StyledTextPart(currentString.toString(), currentStyle, null, parentStyle));
+
+                        // reset string
+                        // style is not reset, because we want to keep the formatting
+                        currentString = new StringBuilder();
+                    }
+
+                    currentStyle = currentStyle.withColor(customColor.asInt());
+                    hexColorFormatting = new StringBuilder();
+                }
+
+                continue;
+            }
+
+            if (current == ChatFormatting.PREFIX_CODE) {
+                nextIsFormatting = true;
+                continue;
+            }
+
+            currentString.append(current);
+        }
+
+        // Check if we have some text left
+        if (!currentString.isEmpty()) {
+            if (style != Style.EMPTY) {
+                // We might have lost an event, so we need to add it back
+                currentStyle =
+                        currentStyle.withClickEvent(style.getClickEvent()).withHoverEvent(style.getHoverEvent());
+            }
+            parts.add(new StyledTextPart(currentString.toString(), currentStyle, null, parentStyle));
+        }
+
+        return parts;
+    }
+
+    // This will convert our JSON format that we use for parsed HTML from the API
+    // Parser located at https://github.com/Wynntils/Static-Storage/blob/main/Utils/html_parser.py
+    static List<StyledTextPart> fromJson(JsonArray jsonArray) {
+        if (jsonArray.isEmpty()) {
+            return List.of(new StyledTextPart("", Style.EMPTY, null, Style.EMPTY));
+        }
+
+        List<StyledTextPart> parts = new ArrayList<>();
+
+        for (JsonElement element : jsonArray) {
+            if (element.isJsonObject()) {
+                Style style = Style.EMPTY;
+                JsonObject jsonObject = element.getAsJsonObject();
+                String text = jsonObject.get("text").getAsString();
+
+                if (jsonObject.has("bold")) {
+                    style = style.withBold(true);
+                }
+                if (jsonObject.has("italic")) {
+                    style = style.withItalic(true);
+                }
+                if (jsonObject.has("underline")) {
+                    style = style.withUnderlined(true);
+                }
+                if (jsonObject.has("strikethrough")) {
+                    style = style.withStrikethrough(true);
+                }
+                if (jsonObject.has("font")) {
+                    style = style.withFont(new FontDescription.Resource(Identifier.withDefaultNamespace(
+                            jsonObject.get("font").getAsString())));
+                }
+                if (jsonObject.has("color")) {
+                    style = style.withColor(
+                            CustomColor.fromHexString(jsonObject.get("color").getAsString())
+                                    .asInt());
+                }
+                if (jsonObject.has("margin-left")) {
+                    String marginType = jsonObject.get("margin-left").getAsString();
+
+                    if (marginType.equals("thin")) {
+                        // FIXME: Currently a guess, there are no items with this margin but it is
+                        // a possible value according to the docs
+                        text = "À" + text;
+                    } else if (marginType.equals("large")) {
+                        text = "ÀÀÀÀ" + text;
+                    }
+                }
+
+                parts.add(new StyledTextPart(text, style, null, Style.EMPTY));
+            }
+        }
+
+        return parts;
+    }
+
+    public JsonObject toJson() {
+        JsonObject jsonObject = new JsonObject();
+
+        String textValue = this.text;
+        String marginLeft = null;
+
+        // Find margin characters, allowing for leading spaces
+        int marginStart = 0;
+        while (marginStart < textValue.length() && textValue.charAt(marginStart) == ' ') {
+            marginStart++;
+        }
+
+        String afterLeadingSpaces = textValue.substring(marginStart);
+
+        if (afterLeadingSpaces.startsWith("ÀÀÀÀ")) {
+            marginLeft = "large";
+            textValue = textValue.substring(0, marginStart) + afterLeadingSpaces.substring(4);
+        } else if (afterLeadingSpaces.startsWith("À")) {
+            marginLeft = "thin";
+            textValue = textValue.substring(0, marginStart) + afterLeadingSpaces.substring(1);
+        }
+
+        jsonObject.addProperty("text", textValue);
+
+        Style mcStyle = style.getStyle();
+
+        if (mcStyle.isBold()) {
+            jsonObject.addProperty("bold", true);
+        }
+        if (mcStyle.isItalic()) {
+            jsonObject.addProperty("italic", true);
+        }
+        if (mcStyle.isUnderlined()) {
+            jsonObject.addProperty("underline", true);
+        }
+        if (mcStyle.isStrikethrough()) {
+            jsonObject.addProperty("strikethrough", true);
+        }
+
+        FontDescription font = mcStyle.getFont();
+        if (font != null) {
+            String fontString = fontToString(font);
+            if (fontString != null && !fontString.equals("default")) {
+                jsonObject.addProperty("font", fontString);
+            }
+        }
+
+        if (mcStyle.getColor() != null) {
+            int colorValue = mcStyle.getColor().getValue();
+            jsonObject.addProperty("color", String.format("#%06X", colorValue & 0xFFFFFF));
+        }
+
+        if (marginLeft != null) {
+            jsonObject.addProperty("margin-left", marginLeft);
+        }
+
+        return jsonObject;
+    }
+
+    private static String fontToString(FontDescription font) {
+        if (font instanceof FontDescription.Resource(Identifier id)) {
+            if ("minecraft".equals(id.getNamespace())) {
+                return id.getPath();
+            }
+            return id.toString();
+        }
+        // AtlasSprite / PlayerSprite are not represented in this JSON format
+        return null;
+    }
+
+    public String getString(PartStyle previousStyle, StyleType type) {
+        return style.asString(previousStyle, type) + text;
+    }
+
+    public StyledText getParent() {
+        return parent;
+    }
+
+    public PartStyle getPartStyle() {
+        return style;
+    }
+
+    public StyledTextPart withStyle(PartStyle style) {
+        return new StyledTextPart(this, style, parent);
+    }
+
+    public StyledTextPart withStyle(Function<PartStyle, PartStyle> function) {
+        return withStyle(function.apply(style));
+    }
+
+    public MutableComponent getComponent() {
+        return Component.literal(text).withStyle(style.getStyle());
+    }
+
+    StyledTextPart asNormalized() {
+        return new StyledTextPart(WynnUtils.normalizeBadString(text), style.getStyle(), parent, null);
+    }
+
+    StyledTextPart stripLeading() {
+        return new StyledTextPart(text.stripLeading(), style.getStyle(), parent, null);
+    }
+
+    StyledTextPart stripTrailing() {
+        return new StyledTextPart(text.stripTrailing(), style.getStyle(), parent, null);
+    }
+
+    public boolean endsWith(String string) {
+        return text.endsWith(string);
+    }
+
+    boolean isEmpty() {
+        return text.isEmpty();
+    }
+
+    boolean isBlank() {
+        return text.isBlank();
+    }
+
+    public int length() {
+        return text.length();
+    }
+
+    @Override
+    public String toString() {
+        return "StyledTextPart[" + "text=" + text + ", " + "style=" + style + ']';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        StyledTextPart that = (StyledTextPart) o;
+        return Objects.equals(text, that.text) && Objects.equals(style, that.style);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(text, style);
+    }
+}

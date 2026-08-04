@@ -1,0 +1,1584 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.utils.render;
+
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.Window;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.wynntils.core.WynntilsMod;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.utils.MathUtils;
+import com.wynntils.utils.colors.CommonColors;
+import com.wynntils.utils.colors.CustomColor;
+import com.wynntils.utils.mc.McUtils;
+import com.wynntils.utils.render.pipelines.CustomRenderPipelines;
+import com.wynntils.utils.render.state.ArcRenderState;
+import com.wynntils.utils.render.state.CustomRectangleRenderState;
+import com.wynntils.utils.render.state.DiagonalColoredRectangleRenderState;
+import com.wynntils.utils.render.state.FloatBlitRenderState;
+import com.wynntils.utils.render.state.FloatColoredRectangleRenderState;
+import com.wynntils.utils.render.state.MulticoloredRectangleRenderState;
+import com.wynntils.utils.render.type.HorizontalAlignment;
+import com.wynntils.utils.render.type.RenderDirection;
+import com.wynntils.utils.render.type.TextShadow;
+import com.wynntils.utils.render.type.VerticalAlignment;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.render.TextureSetup;
+import net.minecraft.client.gui.render.state.GuiItemRenderState;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
+import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPositioner;
+import net.minecraft.client.renderer.OrderedSubmitNodeCollector;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.client.renderer.state.CameraRenderState;
+import net.minecraft.client.renderer.texture.AbstractTexture;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
+import net.minecraft.util.Util;
+import net.minecraft.world.inventory.tooltip.TooltipComponent;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix3x2f;
+import org.joml.Matrix3x2fStack;
+import org.joml.Vector2f;
+
+public final class RenderUtils {
+    // used to render player nametags as semi-transparent
+    private static final int NAMETAG_COLOR = 0x80FFFFFF;
+
+    public static void drawLine(
+            GuiGraphics guiGraphics, CustomColor color, float x1, float y1, float x2, float y2, float width) {
+        // Vertical or horizontal line
+        if (x1 == x2 || y1 == y2) {
+            float halfWidth = width / 2f;
+            fill(
+                    guiGraphics,
+                    color,
+                    Math.min(x1, x2) - (x1 == x2 ? halfWidth : 0),
+                    Math.min(y1, y2) - (y1 == y2 ? halfWidth : 0),
+                    Math.max(x1, x2) + (x1 == x2 ? halfWidth : 0),
+                    Math.max(y1, y2) + (y1 == y2 ? halfWidth : 0));
+            return;
+        }
+
+        // Diagonal line
+        guiGraphics.guiRenderState.submitGuiElement(new DiagonalColoredRectangleRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x1,
+                y1,
+                x2,
+                y2,
+                width,
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawRect(
+            GuiGraphics guiGraphics, CustomColor color, float x, float y, float width, float height) {
+        fill(guiGraphics, color, x, y, x + width, y + height);
+    }
+
+    public static void drawRectBorders(
+            GuiGraphics guiGraphics, CustomColor color, float x1, float y1, float x2, float y2, float lineWidth) {
+        drawLine(guiGraphics, color, x1, y1, x2, y1, lineWidth);
+        drawLine(guiGraphics, color, x2, y1, x2, y2, lineWidth);
+        drawLine(guiGraphics, color, x2, y2, x1, y2, lineWidth);
+        drawLine(guiGraphics, color, x1, y2, x1, y1, lineWidth);
+    }
+
+    public static void drawRotatingBorderSegment(
+            GuiGraphics guiGraphics,
+            CustomColor color,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            float lineWidth,
+            float segmentFraction) {
+        segmentFraction = MathUtils.clamp(segmentFraction, 0.0f, 1.0f);
+
+        if (x2 < x1) {
+            float tmp = x1;
+            x1 = x2;
+            x2 = tmp;
+        }
+        if (y2 < y1) {
+            float tmp = y1;
+            y1 = y2;
+            y2 = tmp;
+        }
+
+        float width = x2 - x1;
+        float height = y2 - y1;
+        float perimeter = 2 * (width + height);
+
+        float progress = (McUtils.player().tickCount % 100) / 100f;
+        float segmentLength = segmentFraction * perimeter;
+        float offset = (progress % 1.0f) * perimeter;
+
+        float[][] points = {
+            {x1, y1, x2, y1},
+            {x2, y1, x2, y2},
+            {x2, y2, x1, y2},
+            {x1, y2, x1, y1}
+        };
+
+        float remainingLength = segmentLength;
+        float accumulatedLength = 0f;
+
+        for (int i = 0; i < points.length; i++) {
+            float[] edge = points[i];
+            float edgeX1 = edge[0];
+            float edgeY1 = edge[1];
+            float edgeX2 = edge[2];
+            float edgeY2 = edge[3];
+            float edgeLength = (float) Math.hypot(edgeX2 - edgeX1, edgeY2 - edgeY1);
+
+            if (offset < accumulatedLength + edgeLength) {
+                float localOffset = offset - accumulatedLength;
+                float segmentEdgeStart = localOffset / edgeLength;
+                float startX = edgeX1 + (edgeX2 - edgeX1) * segmentEdgeStart;
+                float startY = edgeY1 + (edgeY2 - edgeY1) * segmentEdgeStart;
+
+                while (remainingLength > 0) {
+                    float segmentEdgeEnd = Math.min(1f, segmentEdgeStart + (remainingLength / edgeLength));
+                    float endX = edgeX1 + (edgeX2 - edgeX1) * segmentEdgeEnd;
+                    float endY = edgeY1 + (edgeY2 - edgeY1) * segmentEdgeEnd;
+
+                    drawLine(guiGraphics, color, startX, startY, endX, endY, lineWidth);
+
+                    remainingLength -= (segmentEdgeEnd - segmentEdgeStart) * edgeLength;
+
+                    if (segmentEdgeEnd >= 1f) {
+                        i = (i + 1) % points.length;
+                        edge = points[i];
+                        edgeX1 = edge[0];
+                        edgeY1 = edge[1];
+                        edgeX2 = edge[2];
+                        edgeY2 = edge[3];
+
+                        edgeLength = (float) Math.hypot(edgeX2 - edgeX1, edgeY2 - edgeY1);
+                        segmentEdgeStart = 0f;
+
+                        startX = edgeX1;
+                        startY = edgeY1;
+                    } else {
+                        break;
+                    }
+                }
+                break;
+            }
+
+            accumulatedLength += edgeLength;
+        }
+    }
+
+    public static void fill(GuiGraphics guiGraphics, CustomColor color, float x1, float y1, float x2, float y2) {
+        if (x1 > x2) {
+            float t = x1;
+            x1 = x2;
+            x2 = t;
+        }
+        if (y1 > y2) {
+            float t = y1;
+            y1 = y2;
+            y2 = t;
+        }
+
+        guiGraphics.guiRenderState.submitGuiElement(new FloatColoredRectangleRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            RenderPipeline pipeline,
+            Identifier identifier,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            int textureWidth,
+            int textureHeight) {
+        AbstractTexture abstractTexture = McUtils.mc().getTextureManager().getTexture(identifier);
+        guiGraphics.guiRenderState.submitGuiElement(new FloatBlitRenderState(
+                pipeline,
+                TextureSetup.singleTexture(abstractTexture.getTextureView(), abstractTexture.getSampler()),
+                new Matrix3x2f(guiGraphics.pose()),
+                x,
+                y,
+                x + width,
+                y + height,
+                uOffset / textureWidth,
+                (uOffset + u) / textureWidth,
+                vOffset / textureHeight,
+                (vOffset + v) / textureHeight,
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Identifier identifier,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                RenderPipelines.GUI_TEXTURED,
+                identifier,
+                color,
+                x,
+                y,
+                width,
+                height,
+                uOffset,
+                vOffset,
+                u,
+                v,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                texture.identifier(),
+                color,
+                x,
+                y,
+                width,
+                height,
+                uOffset,
+                vOffset,
+                u,
+                v,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x,
+            float y,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                texture.identifier(),
+                CustomColor.NONE,
+                x,
+                y,
+                width,
+                height,
+                uOffset,
+                vOffset,
+                u,
+                v,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawSprite(GuiGraphics guiGraphics, Texture texture, float x, float y) {
+        drawSprite(
+                guiGraphics,
+                RenderPipelines.GUI_TEXTURED,
+                texture.identifier(),
+                texture.atlas(),
+                CustomColor.NONE,
+                x,
+                y,
+                texture.width(),
+                texture.height());
+    }
+
+    public static void drawSprite(GuiGraphics guiGraphics, Texture texture, CustomColor color, float x, float y) {
+        drawSprite(
+                guiGraphics,
+                RenderPipelines.GUI_TEXTURED,
+                texture.identifier(),
+                texture.atlas(),
+                color,
+                x,
+                y,
+                texture.width(),
+                texture.height());
+    }
+
+    public static void drawSprite(
+            GuiGraphics guiGraphics, Texture texture, float x, float y, float width, float height) {
+        drawSprite(
+                guiGraphics,
+                RenderPipelines.GUI_TEXTURED,
+                texture.identifier(),
+                texture.atlas(),
+                CustomColor.NONE,
+                x,
+                y,
+                width,
+                height);
+    }
+
+    public static void drawSprite(
+            GuiGraphics guiGraphics, Texture texture, CustomColor color, float x, float y, float width, float height) {
+        drawSprite(
+                guiGraphics,
+                RenderPipelines.GUI_TEXTURED,
+                texture.identifier(),
+                texture.atlas(),
+                color,
+                x,
+                y,
+                width,
+                height);
+    }
+
+    public static void drawSprite(
+            GuiGraphics guiGraphics,
+            RenderPipeline pipeline,
+            Identifier identifier,
+            Identifier atlas,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height) {
+        Objects.requireNonNull(atlas, "texture must be an atlas texture; use drawTexturedRect for file-based textures");
+        TextureAtlas textureAtlas = McUtils.mc().getAtlasManager().getAtlasOrThrow(atlas);
+        TextureAtlasSprite sprite = textureAtlas.getSprite(identifier);
+        guiGraphics.guiRenderState.submitGuiElement(new FloatBlitRenderState(
+                pipeline,
+                TextureSetup.singleTexture(textureAtlas.getTextureView(), textureAtlas.getSampler()),
+                new Matrix3x2f(guiGraphics.pose()),
+                x,
+                y,
+                x + width,
+                y + height,
+                sprite.getU0(),
+                sprite.getU1(),
+                sprite.getV0(),
+                sprite.getV1(),
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Identifier identifier,
+            float x,
+            float y,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                identifier,
+                CustomColor.NONE,
+                x,
+                y,
+                width,
+                height,
+                uOffset,
+                vOffset,
+                u,
+                v,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x,
+            float y,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v) {
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                CustomColor.NONE,
+                x,
+                y,
+                texture.width(),
+                texture.height(),
+                uOffset,
+                vOffset,
+                u,
+                v,
+                texture.width(),
+                texture.height());
+    }
+
+    public static void drawTexturedRect(GuiGraphics guiGraphics, Texture texture, CustomColor color, float x, float y) {
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                color,
+                x,
+                y,
+                texture.width(),
+                texture.height(),
+                0,
+                0,
+                texture.width(),
+                texture.height(),
+                texture.width(),
+                texture.height());
+    }
+
+    public static void drawTexturedRect(
+            GuiGraphics guiGraphics,
+            Identifier identifier,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                identifier,
+                color,
+                x,
+                y,
+                width,
+                height,
+                0,
+                0,
+                textureWidth,
+                textureHeight,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawTexturedRect(GuiGraphics guiGraphics, Texture texture, float x, float y) {
+        drawTexturedRect(guiGraphics, texture, CustomColor.NONE, x, y);
+    }
+
+    public static void drawScalingTexturedRect(
+            GuiGraphics guiGraphics,
+            Identifier identifier,
+            float x,
+            float y,
+            float width,
+            float height,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                identifier,
+                CustomColor.NONE,
+                x,
+                y,
+                width,
+                height,
+                0,
+                0,
+                textureWidth,
+                textureHeight,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawScalingTexturedRect(
+            GuiGraphics guiGraphics, Texture texture, CustomColor color, float x, float y, float width, float height) {
+        drawScalingTexturedRect(
+                guiGraphics, texture.identifier(), color, x, y, width, height, texture.width(), texture.height());
+    }
+
+    public static void drawScalingTexturedRect(
+            GuiGraphics guiGraphics, Texture texture, float x, float y, float width, float height) {
+        drawScalingTexturedRect(
+                guiGraphics, texture.identifier(), x, y, width, height, texture.width(), texture.height());
+    }
+
+    public static void drawScalingTexturedRect(
+            GuiGraphics guiGraphics,
+            Identifier identifier,
+            CustomColor color,
+            float x,
+            float y,
+            float width,
+            float height,
+            int textureWidth,
+            int textureHeight) {
+        drawTexturedRect(
+                guiGraphics,
+                identifier,
+                color,
+                x,
+                y,
+                width,
+                height,
+                0,
+                0,
+                textureWidth,
+                textureHeight,
+                textureWidth,
+                textureHeight);
+    }
+
+    // nine slice scalling
+    public static void drawNineSliceScalingTexturedRect(
+            GuiGraphics guiGraphics, Texture texture, float x, float y, float width, float height) {
+        if (!texture.isNineSliced()) {
+            WynntilsMod.warn("Tried to render non Nine Sliced Texture via drawNineSliceScalingTexturedRect.");
+            return;
+        }
+
+        int texWidth = texture.width();
+        int texHeight = texture.height();
+        int left = texture.left();
+        int right = texture.right();
+        int top = texture.top();
+        int bottom = texture.bottom();
+
+        // Don't let the center become negative
+        width = Math.max(width, left + right);
+        height = Math.max(height, top + bottom);
+
+        float centerWidth = width - left - right;
+        float centerHeight = height - top - bottom;
+
+        int texCenterWidth = texWidth - left - right;
+        int texCenterHeight = texHeight - top - bottom;
+
+        // Top Left
+        drawTexturedRect(guiGraphics, texture, x, y, left, top, 0, 0, left, top, texWidth, texHeight);
+
+        // Top
+        drawTexturedRect(
+                guiGraphics, texture, x + left, y, centerWidth, top, left, 0, texCenterWidth, top, texWidth, texHeight);
+
+        // Top Right
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x + left + centerWidth,
+                y,
+                right,
+                top,
+                texWidth - right,
+                0,
+                right,
+                top,
+                texWidth,
+                texHeight);
+
+        // Left
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x,
+                y + top,
+                left,
+                centerHeight,
+                0,
+                top,
+                left,
+                texCenterHeight,
+                texWidth,
+                texHeight);
+
+        // Center
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x + left,
+                y + top,
+                centerWidth,
+                centerHeight,
+                left,
+                top,
+                texCenterWidth,
+                texCenterHeight,
+                texWidth,
+                texHeight);
+
+        // Right
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x + left + centerWidth,
+                y + top,
+                right,
+                centerHeight,
+                texWidth - right,
+                top,
+                right,
+                texCenterHeight,
+                texWidth,
+                texHeight);
+
+        // Bottom Left
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x,
+                y + top + centerHeight,
+                left,
+                bottom,
+                0,
+                texHeight - bottom,
+                left,
+                bottom,
+                texWidth,
+                texHeight);
+
+        // Bottom
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x + left,
+                y + top + centerHeight,
+                centerWidth,
+                bottom,
+                left,
+                texHeight - bottom,
+                texCenterWidth,
+                bottom,
+                texWidth,
+                texHeight);
+
+        // Bottom Right
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                x + left + centerWidth,
+                y + top + centerHeight,
+                right,
+                bottom,
+                texWidth - right,
+                texHeight - bottom,
+                right,
+                bottom,
+                texWidth,
+                texHeight);
+    }
+
+    public static void drawHoverableTexturedRect(
+            GuiGraphics guiGraphics, Texture texture, float x, float y, boolean hovered, RenderDirection dir) {
+        int textureWidth = texture.width();
+        int textureHeight = texture.height();
+
+        int renderWidth = (dir == RenderDirection.HORIZONTAL ? textureWidth / 2 : textureWidth);
+        int renderHeight = (dir == RenderDirection.VERTICAL ? textureHeight / 2 : textureHeight);
+
+        float uOffset = (hovered && dir == RenderDirection.HORIZONTAL ? textureWidth / 2f : 0);
+        float vOffset = (hovered && dir == RenderDirection.VERTICAL ? textureHeight / 2f : 0);
+
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                CustomColor.NONE,
+                x,
+                y,
+                renderWidth,
+                renderHeight,
+                uOffset,
+                vOffset,
+                renderWidth,
+                renderHeight,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void drawScalingHoverableTexturedRect(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x,
+            float y,
+            float width,
+            float height,
+            boolean hovered,
+            RenderDirection dir) {
+        int textureWidth = texture.width();
+        int textureHeight = texture.height();
+
+        int regionWidth = (dir == RenderDirection.HORIZONTAL ? textureWidth / 2 : textureWidth);
+        int regionHeight = (dir == RenderDirection.VERTICAL ? textureHeight / 2 : textureHeight);
+
+        float uOffset = (hovered && dir == RenderDirection.HORIZONTAL ? regionWidth : 0);
+        float vOffset = (hovered && dir == RenderDirection.VERTICAL ? regionHeight : 0);
+
+        drawTexturedRect(
+                guiGraphics,
+                texture,
+                CustomColor.NONE,
+                x,
+                y,
+                width,
+                height,
+                uOffset,
+                vOffset,
+                regionWidth,
+                regionHeight,
+                textureWidth,
+                textureHeight);
+    }
+
+    public static void renderVignetteOverlay(GuiGraphics guiGraphics, CustomColor color, float alpha) {
+        Window window = McUtils.window();
+
+        drawTexturedRect(
+                guiGraphics,
+                Texture.VIGNETTE,
+                color.withAlpha(alpha),
+                0f,
+                0f,
+                window.getGuiScaledWidth(),
+                window.getGuiScaledHeight(),
+                0,
+                0,
+                Texture.VIGNETTE.width(),
+                Texture.VIGNETTE.height(),
+                Texture.VIGNETTE.width(),
+                Texture.VIGNETTE.height());
+    }
+
+    public static void fillGradient(
+            GuiGraphics guiGraphics,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            CustomColor colorA,
+            CustomColor colorB,
+            RenderDirection direction) {
+        guiGraphics.guiRenderState.submitGuiElement(new CustomRectangleRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x1,
+                y1,
+                x2,
+                y2,
+                colorA,
+                colorB,
+                direction,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawArc(
+            GuiGraphics guiGraphics,
+            CustomColor color,
+            float x,
+            float y,
+            float fill,
+            int innerRadius,
+            int outerRadius) {
+        drawArc(guiGraphics, color, x, y, fill, innerRadius, outerRadius, 0);
+    }
+
+    public static void drawArc(
+            GuiGraphics guiGraphics,
+            CustomColor color,
+            float x,
+            float y,
+            float fill,
+            int innerRadius,
+            int outerRadius,
+            float angleOffset) {
+        guiGraphics.guiRenderState.submitGuiElement(new ArcRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x,
+                y,
+                fill,
+                innerRadius,
+                outerRadius,
+                angleOffset,
+                16F,
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawArc(
+            GuiGraphics guiGraphics,
+            CustomColor color,
+            float x,
+            float y,
+            float fill,
+            int innerRadius,
+            int outerRadius,
+            float angleOffset,
+            float maxSteps) {
+        guiGraphics.guiRenderState.submitGuiElement(new ArcRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x,
+                y,
+                fill,
+                innerRadius,
+                outerRadius,
+                angleOffset,
+                maxSteps,
+                color,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void drawRoundedRect(
+            GuiGraphics guiGraphics,
+            CustomColor fillColor,
+            float x,
+            float y,
+            float width,
+            float height,
+            int innerRadius,
+            int outerRadius) {
+        float x2 = x + width;
+        float y2 = y + height;
+
+        // Fill the rect
+        float offset = outerRadius - 1;
+        float offset2 = ((float) outerRadius / 2) - 0.5F;
+        float rectWidth = width - offset2 * 4;
+        float rectHeight = height - offset2 * 4;
+        drawRect(guiGraphics, fillColor, x + offset2 * 2, y + offset2 * 2, rectWidth, rectHeight);
+
+        // Edges
+        offset2 -= 0.4F;
+        drawLine(guiGraphics, fillColor, x + offset, y + offset2, x2 - offset, y + offset2, outerRadius);
+        drawLine(guiGraphics, fillColor, x2 - offset2, y + offset, x2 - offset2, y2 - offset, outerRadius);
+        drawLine(guiGraphics, fillColor, x + offset, y2 - offset2, x2 - offset, y2 - offset2, outerRadius);
+        drawLine(guiGraphics, fillColor, x + offset2, y + offset, x + offset2, y2 - offset, outerRadius);
+
+        // Corners
+        offset *= 2;
+        guiGraphics.pose().pushMatrix();
+        guiGraphics.pose().translate(-1, -1);
+        drawRoundedCorner(guiGraphics, fillColor, x, y, innerRadius, outerRadius, Mth.HALF_PI * 3);
+        drawRoundedCorner(guiGraphics, fillColor, x, y2 - offset, innerRadius, outerRadius, (float) Math.PI);
+        drawRoundedCorner(guiGraphics, fillColor, x2 - offset, y2 - offset, innerRadius, outerRadius, Mth.HALF_PI);
+        drawRoundedCorner(guiGraphics, fillColor, x2 - offset, y, innerRadius, outerRadius, 0);
+        guiGraphics.pose().popMatrix();
+    }
+
+    public static void drawRoundedRectWithBorder(
+            GuiGraphics guiGraphics,
+            CustomColor borderColor,
+            CustomColor fillColor,
+            float x,
+            float y,
+            float width,
+            float height,
+            float lineWidth,
+            int innerRadius,
+            int outerRadius) {
+        float x2 = x + width;
+        float y2 = y + height;
+
+        // Fill the rect
+        final int fillOffset = (int) lineWidth;
+        drawRect(
+                guiGraphics,
+                fillColor,
+                x + fillOffset,
+                y + fillOffset,
+                width - fillOffset * 2,
+                height - fillOffset * 2);
+        drawLine(guiGraphics, fillColor, x + fillOffset, y + fillOffset, x2 - fillOffset, y + fillOffset, lineWidth);
+        drawLine(guiGraphics, fillColor, x2 - fillOffset, y + fillOffset, x2 - fillOffset, y2 - fillOffset, lineWidth);
+        drawLine(guiGraphics, fillColor, x + fillOffset, y2 - fillOffset, x2 - fillOffset, y2 - fillOffset, lineWidth);
+        drawLine(guiGraphics, fillColor, x + fillOffset, y + fillOffset, x + fillOffset, y2 - fillOffset, lineWidth);
+
+        float offset = outerRadius - 1;
+
+        // Edges
+        drawLine(guiGraphics, borderColor, x + offset, y, x2 - offset, y, lineWidth);
+        drawLine(guiGraphics, borderColor, x2, y + offset, x2, y2 - offset, lineWidth);
+        drawLine(guiGraphics, borderColor, x + offset, y2, x2 - offset, y2, lineWidth);
+        drawLine(guiGraphics, borderColor, x, y + offset, x, y2 - offset, lineWidth);
+
+        // Corners
+        float offset2 = (lineWidth / 2) - 1;
+        offset = (offset * 2) - offset2;
+        guiGraphics.pose().pushMatrix();
+        guiGraphics.pose().translate(-1, -1);
+        drawRoundedCorner(
+                guiGraphics, borderColor, x - offset2, y - offset2, innerRadius, outerRadius, Mth.HALF_PI * 3);
+        drawRoundedCorner(
+                guiGraphics, borderColor, x - offset2, y2 - offset, innerRadius, outerRadius, (float) Math.PI);
+        drawRoundedCorner(guiGraphics, borderColor, x2 - offset, y2 - offset, innerRadius, outerRadius, Mth.HALF_PI);
+        drawRoundedCorner(guiGraphics, borderColor, x2 - offset, y - offset2, innerRadius, outerRadius, 0);
+        guiGraphics.pose().popMatrix();
+    }
+
+    private static void drawRoundedCorner(
+            GuiGraphics guiGraphics,
+            CustomColor color,
+            float x,
+            float y,
+            int innerRadius,
+            int outerRadius,
+            float angleOffset) {
+        drawArc(guiGraphics, color, x, y, 0.25f, innerRadius, outerRadius, angleOffset);
+    }
+
+    /**
+     * drawProgressBar
+     * Draws a progress bar (textureY1 and textureY2 now specify both textures with background being on top of the bar)
+     *
+     * @param guiGraphics guiGraphics to use
+     * @param texture   the texture to use
+     * @param customColor the color for the bar
+     * @param x1        left x on screen
+     * @param y1        top y on screen
+     * @param x2        right x on screen
+     * @param y2        bottom right on screen
+     * @param textureX1 texture left x for the part
+     * @param textureY1 texture top y for the part (top of background)
+     * @param textureX2 texture right x for the part
+     * @param textureY2 texture bottom y for the part (bottom of bar)
+     * @param progress  progress of the bar, 0.0f to 1.0f is left to right and 0.0f to -1.0f is right to left
+     */
+    public static void drawColoredProgressBar(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            CustomColor customColor,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            int textureX1,
+            int textureY1,
+            int textureX2,
+            int textureY2,
+            float progress) {
+        int half = (textureY1 + textureY2) / 2 + (textureY2 - textureY1) % 2;
+        drawProgressBarBackground(guiGraphics, texture, x1, y1, x2, y2, textureX1, textureY1, textureX2, half);
+        drawProgressBarForegroundWithColor(
+                guiGraphics,
+                texture,
+                customColor,
+                x1,
+                y1,
+                x2,
+                y2,
+                textureX1,
+                half,
+                textureX2,
+                textureY2 + (textureY2 - textureY1) % 2,
+                progress);
+    }
+
+    /**
+     * drawProgressBar
+     * Draws a progress bar (textureY1 and textureY2 now specify both textures with background being on top of the bar)
+     *
+     * @param guiGraphics guiGraphics to use
+     * @param texture   the texture to use
+     * @param x1        left x on screen
+     * @param y1        top y on screen
+     * @param x2        right x on screen
+     * @param y2        bottom right on screen
+     * @param textureX1 texture left x for the part
+     * @param textureY1 texture top y for the part (top of background)
+     * @param textureX2 texture right x for the part
+     * @param textureY2 texture bottom y for the part (bottom of bar)
+     * @param progress  progress of the bar, 0.0f to 1.0f is left to right and 0.0f to -1.0f is right to left
+     */
+    public static void drawProgressBar(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            int textureX1,
+            int textureY1,
+            int textureX2,
+            int textureY2,
+            float progress) {
+        int half = (textureY1 + textureY2) / 2 + (textureY2 - textureY1) % 2;
+        drawProgressBarBackground(guiGraphics, texture, x1, y1, x2, y2, textureX1, textureY1, textureX2, half);
+        drawProgressBarForeground(
+                guiGraphics,
+                texture,
+                x1,
+                y1,
+                x2,
+                y2,
+                textureX1,
+                half,
+                textureX2,
+                textureY2 + (textureY2 - textureY1) % 2,
+                progress);
+    }
+
+    public static void drawProgressBarForeground(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            int textureX1,
+            int textureY1,
+            int textureX2,
+            int textureY2,
+            float progress) {
+        if (progress == 0f) {
+            return;
+        }
+
+        float width = x2 - x1;
+        float texWidth = textureX2 - textureX1;
+
+        float pxMin = x1;
+        float pxMax = x2;
+
+        float uOffset = textureX1;
+        float uSize = textureX2 - textureX1;
+
+        if (progress < 1f && progress > -1f) {
+            if (progress < 0f) {
+                float cut = 1f + progress;
+                pxMin = x1 + width * cut;
+
+                uOffset = textureX1 + texWidth * cut;
+                uSize = textureX2 - uOffset;
+            } else {
+                float cut = progress;
+                pxMax = x1 + width * cut;
+
+                uSize = texWidth * cut;
+            }
+        }
+
+        drawTexturedRect(
+                guiGraphics,
+                CustomRenderPipelines.PROGRESS_BAR_PIPELINE,
+                texture.identifier(),
+                CommonColors.WHITE,
+                pxMin,
+                y1,
+                pxMax - pxMin,
+                y2 - y1,
+                uOffset,
+                textureY1,
+                uSize,
+                textureY2 - textureY1,
+                texture.width(),
+                texture.height());
+    }
+
+    private static void drawProgressBarForegroundWithColor(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            CustomColor customColor,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            int textureX1,
+            int textureY1,
+            int textureX2,
+            int textureY2,
+            float progress) {
+        if (progress == 0f) {
+            return;
+        }
+
+        float width = x2 - x1;
+        float texWidth = textureX2 - textureX1;
+
+        float pxMin = x1;
+        float pxMax = x2;
+
+        float uOffset = textureX1;
+        float uSize = textureX2 - textureX1;
+
+        if (progress < 1f && progress > -1f) {
+            if (progress < 0f) {
+                float cut = 1f + progress;
+                pxMin = x1 + width * cut;
+
+                uOffset = textureX1 + texWidth * cut;
+                uSize = textureX2 - uOffset;
+            } else {
+                float cut = progress;
+                pxMax = x1 + width * cut;
+
+                uSize = texWidth * cut;
+            }
+        }
+
+        drawTexturedRect(
+                guiGraphics,
+                CustomRenderPipelines.PROGRESS_BAR_PIPELINE,
+                texture.identifier(),
+                customColor,
+                pxMin,
+                y1,
+                pxMax - pxMin,
+                y2 - y1,
+                uOffset,
+                textureY1,
+                uSize,
+                textureY2 - textureY1,
+                texture.width(),
+                texture.height());
+    }
+
+    public static void drawProgressBarBackground(
+            GuiGraphics guiGraphics,
+            Texture texture,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            int textureX1,
+            int textureY1,
+            int textureX2,
+            int textureY2) {
+        drawTexturedRect(
+                guiGraphics,
+                CustomRenderPipelines.PROGRESS_BAR_PIPELINE,
+                texture.identifier(),
+                CommonColors.WHITE,
+                x1,
+                y1,
+                x2 - x1,
+                y2 - y1,
+                textureX1,
+                textureY1,
+                textureX2 - textureX1,
+                textureY2 - textureY1,
+                texture.width(),
+                texture.height());
+    }
+
+    public static void enableScissor(GuiGraphics guiGraphics, int x, int y, int width, int height) {
+        guiGraphics.enableScissor(x, y, x + width, y + height);
+    }
+
+    public static void disableScissor(GuiGraphics guiGraphics) {
+        if (guiGraphics.scissorStack.stack.isEmpty()) return;
+
+        guiGraphics.disableScissor();
+    }
+
+    public static void rotatePose(Matrix3x2fStack matrix3x2fStack, float centerX, float centerZ, float angle) {
+        matrix3x2fStack.translate(centerX, centerZ);
+        matrix3x2fStack.rotate((float) Math.toRadians(angle));
+        matrix3x2fStack.translate(-centerX, -centerZ);
+    }
+
+    public static void renderItem(GuiGraphics guiGraphics, ItemStack itemStack, int x, int y) {
+        guiGraphics.renderItem(itemStack, x, y);
+    }
+
+    public static void renderScalingItem(
+            GuiGraphics guiGraphics, ItemStack itemStack, int x, int y, int width, int height) {
+        if (itemStack.isEmpty()) return;
+
+        TrackingItemStackRenderState renderState = new TrackingItemStackRenderState();
+        McUtils.mc()
+                .getItemModelResolver()
+                .updateForTopItem(
+                        renderState, itemStack, ItemDisplayContext.GUI, McUtils.mc().level, McUtils.player(), 0);
+
+        AABB bounds = renderState.getModelBoundingBox();
+        float itemWidth = (float) bounds.getXsize() * 16f;
+        float itemHeight = (float) bounds.getYsize() * 16f;
+        if (itemWidth <= 0f || itemHeight <= 0f) return;
+
+        float scaleX = width / itemWidth;
+        float scaleY = height / itemHeight;
+
+        guiGraphics.pose().pushMatrix();
+        guiGraphics.pose().translate(x, y);
+        guiGraphics.pose().scale(scaleX, scaleY);
+
+        guiGraphics.guiRenderState.submitItem(new GuiItemRenderState(
+                itemStack.getItem().getName().toString(),
+                new Matrix3x2f(guiGraphics.pose()),
+                renderState,
+                0,
+                0,
+                guiGraphics.scissorStack.peek()));
+
+        guiGraphics.pose().popMatrix();
+    }
+
+    public static void renderTooltip(GuiGraphics guiGraphics, List<Component> tooltipLines, int mouseX, int mouseY) {
+        renderTooltip(
+                guiGraphics, FontRenderer.getInstance().getFont(), tooltipLines, Optional.empty(), mouseX, mouseY);
+    }
+
+    public static void renderTooltip(GuiGraphics guiGraphics, ItemStack itemStack, int mouseX, int mouseY) {
+        renderTooltip(
+                guiGraphics,
+                FontRenderer.getInstance().getFont(),
+                Screen.getTooltipFromItem(McUtils.mc(), itemStack),
+                itemStack.getTooltipImage(),
+                mouseX,
+                mouseY,
+                itemStack.get(DataComponents.TOOLTIP_STYLE));
+    }
+
+    public static void renderTooltip(
+            GuiGraphics guiGraphics,
+            Font font,
+            List<Component> tooltipLines,
+            Optional<TooltipComponent> tooltipImage,
+            int mouseX,
+            int mouseY) {
+        renderTooltip(guiGraphics, font, tooltipLines, tooltipImage, mouseX, mouseY, null);
+    }
+
+    public static void renderTooltip(
+            GuiGraphics guiGraphics,
+            Font font,
+            List<Component> tooltipLines,
+            Optional<TooltipComponent> tooltipImage,
+            int mouseX,
+            int mouseY,
+            Identifier background) {
+        List<ClientTooltipComponent> list = tooltipLines.stream()
+                .map(Component::getVisualOrderText)
+                .map(ClientTooltipComponent::create)
+                .collect(Util.toMutableList());
+        tooltipImage.ifPresent(
+                tooltipComponent -> list.add(list.isEmpty() ? 0 : 1, ClientTooltipComponent.create(tooltipComponent)));
+        guiGraphics.renderTooltip(font, list, mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, background);
+    }
+
+    public static void renderCustomNametag(
+            PoseStack poseStack,
+            Component nametag,
+            float customOffset,
+            EntityRenderState entityRenderState,
+            CameraRenderState cameraRenderState,
+            OrderedSubmitNodeCollector collector) {
+        Vec3 pos = new Vec3(
+                entityRenderState.nameTagAttachment.x,
+                entityRenderState.nameTagAttachment.y - 0.2F + customOffset,
+                entityRenderState.nameTagAttachment.z);
+
+        collector.submitNameTag(
+                poseStack,
+                pos,
+                0,
+                nametag,
+                !entityRenderState.isDiscrete,
+                entityRenderState.lightCoords,
+                entityRenderState.distanceToCameraSq,
+                cameraRenderState);
+    }
+
+    public static void renderLeaderboardBadge(
+            PoseStack poseStack,
+            OrderedSubmitNodeCollector collector,
+            EntityRenderState entityState,
+            CameraRenderState cameraState,
+            Identifier texture,
+            float width,
+            float height,
+            float uOffset,
+            float vOffset,
+            float u,
+            float v,
+            float textureWidth,
+            float textureHeight,
+            float customOffset,
+            float horizontalShift,
+            float verticalShift) {
+        poseStack.pushPose();
+
+        poseStack.translate(
+                entityState.nameTagAttachment.x,
+                entityState.nameTagAttachment.y + 0.35f + customOffset,
+                entityState.nameTagAttachment.z);
+        poseStack.mulPose(cameraState.orientation);
+        poseStack.scale(0.025f, -0.025f, 0.025f);
+
+        float halfWidth = width / 2f;
+        float halfHeight = height / 2f;
+
+        float u1 = uOffset / textureWidth;
+        float v1 = vOffset / textureHeight;
+        float u2 = (uOffset + u) / textureWidth;
+        float v2 = (vOffset + v) / textureHeight;
+
+        CustomColor badgeColor;
+        if (entityState.isDiscrete) {
+            badgeColor = CommonColors.WHITE.brightnessShift(-0.4f);
+        } else {
+            badgeColor = CommonColors.WHITE;
+        }
+
+        collector.submitCustomGeometry(poseStack, RenderTypes.text(texture), (pose, vertexConsumer) -> {
+            vertexConsumer
+                    .addVertex(pose, -halfWidth + horizontalShift, -halfHeight - verticalShift, 0)
+                    .setUv(u1, v1)
+                    .setLight(entityState.lightCoords)
+                    .setColor(badgeColor.asInt());
+
+            vertexConsumer
+                    .addVertex(pose, -halfWidth + horizontalShift, halfHeight - verticalShift, 0)
+                    .setUv(u1, v2)
+                    .setLight(entityState.lightCoords)
+                    .setColor(badgeColor.asInt());
+
+            vertexConsumer
+                    .addVertex(pose, halfWidth + horizontalShift, halfHeight - verticalShift, 0)
+                    .setUv(u2, v2)
+                    .setLight(entityState.lightCoords)
+                    .setColor(badgeColor.asInt());
+
+            vertexConsumer
+                    .addVertex(pose, halfWidth + horizontalShift, -halfHeight - verticalShift, 0)
+                    .setUv(u2, v1)
+                    .setLight(entityState.lightCoords)
+                    .setColor(badgeColor.asInt());
+        });
+
+        poseStack.popPose();
+    }
+
+    public static void drawMulticoloredRectBorders(
+            GuiGraphics guiGraphics,
+            List<CustomColor> colors,
+            float x,
+            float y,
+            float width,
+            float height,
+            float externalLineWidth,
+            float internalLineWidth) {
+        if (colors.size() == 1) {
+            drawRectBorders(guiGraphics, colors.getFirst(), x, y, x + width, y + height, externalLineWidth);
+            return;
+        }
+        float splitX = width / (colors.size() - 1);
+
+        for (int i = 0; i < colors.size(); i++) {
+            CustomColor color = colors.get(i);
+            float leftX = Mth.clamp(x + splitX * (i - 1), x, x + width);
+            float centerX = Mth.clamp(x + splitX * i, x, x + width);
+            float rightX = Mth.clamp(x + splitX * (i + 1), x, x + width);
+
+            // bottom left to bottom center (always drawn)
+            drawLine(guiGraphics, color, leftX, y + height, centerX, y + height, externalLineWidth);
+            // bottom center to top right (drawn on i!=colors.size()-1)
+            drawLine(
+                    guiGraphics,
+                    color,
+                    centerX,
+                    y + height,
+                    rightX,
+                    y,
+                    (i == colors.size() - 1 ? externalLineWidth : internalLineWidth));
+            // top right to top center (always drawn)
+            drawLine(guiGraphics, color, rightX, y, centerX, y, externalLineWidth);
+            // top center to bottom left (drawn on i!=0)
+            drawLine(
+                    guiGraphics,
+                    color,
+                    centerX,
+                    y,
+                    leftX,
+                    y + height,
+                    (i != 0 ? internalLineWidth : externalLineWidth));
+        }
+    }
+
+    public static void drawMulticoloredRect(
+            GuiGraphics guiGraphics, List<CustomColor> colors, float x, float y, float width, float height) {
+        if (colors.size() == 1) {
+            drawRect(guiGraphics, colors.getFirst(), x, y, width, height);
+            return;
+        }
+
+        guiGraphics.guiRenderState.submitGuiElement(new MulticoloredRectangleRenderState(
+                RenderPipelines.GUI,
+                TextureSetup.noTexture(),
+                new Matrix3x2f(guiGraphics.pose()),
+                x,
+                y,
+                x + width,
+                y + height,
+                width,
+                colors,
+                guiGraphics.scissorStack.peek()));
+    }
+
+    public static void renderDebugGrid(
+            GuiGraphics guiGraphics, float gridDivisions, float dividedWidth, float dividedHeight) {
+        for (int i = 1; i <= gridDivisions - 1; i++) {
+            double x = dividedWidth * i;
+            double y = dividedHeight * i;
+            drawRect(guiGraphics, CommonColors.GRAY, (int) x, 0, 1, (int) (dividedHeight * gridDivisions));
+            drawRect(guiGraphics, CommonColors.GRAY, 0, (int) y, (int) (dividedWidth * gridDivisions), 1);
+            if (i % 2 == 0) continue; // reduce clutter
+            FontRenderer.getInstance()
+                    .renderText(
+                            guiGraphics,
+                            StyledText.fromString(String.valueOf(i)),
+                            (float) x,
+                            dividedHeight * (gridDivisions / 2),
+                            CommonColors.RED,
+                            HorizontalAlignment.CENTER,
+                            VerticalAlignment.MIDDLE,
+                            TextShadow.NORMAL);
+            FontRenderer.getInstance()
+                    .renderText(
+                            guiGraphics,
+                            StyledText.fromString(String.valueOf(i)),
+                            dividedWidth * (gridDivisions / 2),
+                            (float) y,
+                            CommonColors.CYAN,
+                            HorizontalAlignment.CENTER,
+                            VerticalAlignment.MIDDLE,
+                            TextShadow.NORMAL);
+        }
+    }
+
+    public static void drawPolygon(
+            GuiGraphics guiGraphics,
+            CustomColor fillColor,
+            CustomColor borderColor,
+            float borderWidth,
+            List<Vector2f> vertices) {
+        if (vertices.size() < 3) {
+            WynntilsMod.warn("Tried to draw a polygon with less than 3 vertices");
+            return;
+        }
+
+        // Fill the polygon using a triangle fan decomposition
+        if (fillColor != CustomColor.NONE) {
+            Vector2f firstVertex = vertices.getFirst();
+            for (int i = 1; i < vertices.size() - 1; i++) {
+                Vector2f v1 = vertices.get(i);
+                Vector2f v2 = vertices.get(i + 1);
+
+                // Draw each triangle as a filled shape
+                // Approximate triangle fill using drawLine with enough width
+                // For a proper fill, we draw lines from v1 to v2 across the triangle
+                drawTriangleFill(guiGraphics, fillColor, firstVertex, v1, v2);
+            }
+        }
+
+        // Draw border lines
+        if (borderColor != CustomColor.NONE && borderWidth > 0f) {
+            for (int i = 0; i < vertices.size() - 1; i++) {
+                Vector2f v1 = vertices.get(i);
+                Vector2f v2 = vertices.get(i + 1);
+                drawLine(guiGraphics, borderColor, v1.x(), v1.y(), v2.x(), v2.y(), borderWidth);
+            }
+            // Close the polygon
+            Vector2f last = vertices.getLast();
+            Vector2f first = vertices.getFirst();
+            drawLine(guiGraphics, borderColor, last.x(), last.y(), first.x(), first.y(), borderWidth);
+        }
+    }
+
+    private static void drawTriangleFill(
+            GuiGraphics guiGraphics, CustomColor color, Vector2f v0, Vector2f v1, Vector2f v2) {
+        // Approximate triangle fill by drawing horizontal lines (scanline fill)
+        float minY = Math.min(v0.y(), Math.min(v1.y(), v2.y()));
+        float maxY = Math.max(v0.y(), Math.max(v1.y(), v2.y()));
+
+        for (float y = minY; y <= maxY; y += 1.0f) {
+            // Find the x intersections of the scanline with the triangle edges
+            float minX = Float.MAX_VALUE;
+            float maxX = Float.MIN_VALUE;
+
+            float[] xs = new float[3];
+            boolean[] valid = new boolean[3];
+
+            valid[0] = intersectEdge(v0, v1, y, xs, 0);
+            valid[1] = intersectEdge(v1, v2, y, xs, 1);
+            valid[2] = intersectEdge(v2, v0, y, xs, 2);
+
+            for (int i = 0; i < 3; i++) {
+                if (valid[i]) {
+                    minX = Math.min(minX, xs[i]);
+                    maxX = Math.max(maxX, xs[i]);
+                }
+            }
+
+            if (minX <= maxX) {
+                fill(guiGraphics, color, minX, y, maxX, y + 1);
+            }
+        }
+    }
+
+    private static boolean intersectEdge(Vector2f a, Vector2f b, float y, float[] xs, int index) {
+        if ((a.y() <= y && b.y() > y) || (b.y() <= y && a.y() > y)) {
+            float t = (y - a.y()) / (b.y() - a.y());
+            xs[index] = a.x() + t * (b.x() - a.x());
+            return true;
+        }
+        return false;
+    }
+}

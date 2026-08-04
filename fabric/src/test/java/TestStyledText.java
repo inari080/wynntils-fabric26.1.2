@@ -1,0 +1,1340 @@
+/*
+ * Copyright © Wynntils 2023-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.wynntils.core.WynntilsMod;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.core.text.StyledTextPart;
+import com.wynntils.core.text.type.StyleType;
+import com.wynntils.utils.colors.CustomColor;
+import com.wynntils.utils.type.IterationDecision;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.resources.Identifier;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+public class TestStyledText {
+    @BeforeAll
+    public static void setup() {
+        WynntilsMod.setupTestEnv();
+    }
+
+    @Test
+    public void fontStyle() {
+        FontDescription bannerPillFont =
+                new FontDescription.Resource(Identifier.fromNamespaceAndPath("minecraft", "banner/pill"));
+        final Component component = Component.empty()
+                .withStyle(ChatFormatting.RED)
+                .withStyle(Style.EMPTY.withFont(bannerPillFont))
+                .append(Component.literal("inherited font"));
+        final String expected = "§c§{fr:bp}inherited font";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_FONTS),
+                "StyledText for font formats returned an unexpected value.");
+
+        StyledText roundtrip = StyledText.fromString(expected);
+        String strippedFromFont = roundtrip.getStringWithoutFormatting();
+        Assertions.assertEquals(
+                "inherited font",
+                strippedFromFont,
+                "StyledText roundtrip string without formatting returned an unexpected value.");
+        String roundtripStr = roundtrip.getString(StyleType.INCLUDE_FONTS);
+        Assertions.assertEquals(roundtripStr, expected, "StyledText roundtrip string returned an unexpected value.");
+
+        Assertions.assertEquals(styledText, roundtrip, "StyledText roundtrip ST returned an unexpected value.");
+
+        Component roundtripComp = roundtrip.getComponent();
+        if (roundtripComp instanceof MutableComponent mutableComponent) {
+            Assertions.assertEquals(
+                    mutableComponent.getSiblings().getFirst().getStyle().getFont(),
+                    bannerPillFont,
+                    "Component roundtrip contained an unexpected font.");
+        } else {
+            Assertions.fail("StyledText roundtrip Component was not a MutableComponent.");
+        }
+    }
+
+    @Test
+    public void fontStyleInvalidFonts() {
+        final Component component = Component.empty()
+                .withStyle(ChatFormatting.RED)
+                .withStyle(Style.EMPTY.withFont(new FontDescription.Resource(
+                        Identifier.fromNamespaceAndPath("minecraft", "banner/nosuchfont"))))
+                .append(Component.literal("inherited font"));
+        final String expected = "§c§{fr:minecraft:banner/nosuchfont}inherited font";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_FONTS),
+                "StyledText for font formats returned an unexpected value.");
+
+        StyledText roundtrip = StyledText.fromString(expected);
+        String strippedFromFont = roundtrip.getStringWithoutFormatting();
+        Assertions.assertEquals(
+                "inherited font",
+                strippedFromFont,
+                "StyledText roundtrip string without formatting returned an unexpected value.");
+        String roundtripStr = roundtrip.getString(StyleType.INCLUDE_FONTS);
+        Assertions.assertEquals(roundtripStr, expected, "StyledText roundtrip string returned an unexpected value.");
+
+        Assertions.assertEquals(styledText, roundtrip, "StyledText roundtrip ST returned an unexpected value.");
+    }
+
+    @Test
+    public void advancedComponentTree_shouldProduceCorrectString() {
+        final Component component = Component.empty()
+                .append(Component.literal("italicred")
+                        .withStyle(ChatFormatting.ITALIC)
+                        .withStyle(ChatFormatting.RED)
+                        .append(Component.literal("blue")
+                                .withStyle(ChatFormatting.BLUE)
+                                .withStyle(style ->
+                                        style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover")))))
+                        .append(Component.literal("nonitalic").withStyle(Style.EMPTY.withItalic(false)))
+                        .append(Component.literal("inherited")
+                                .append(Component.literal("bold").withStyle(ChatFormatting.BOLD))))
+                .append(Component.literal("after")
+                        .withStyle(style -> style.withClickEvent(new ClickEvent.RunCommand("/command"))));
+
+        final String expectedIncludeEvents = "§c§oitalicred§9§o§<1>blue§cnonitalic§oinherited§lbold§r§[1]after";
+        final String expectedDefault = "§c§oitalicred§9§oblue§cnonitalic§oinherited§lbold§rafter";
+        final String expectedNoFormat = "italicredbluenonitalicinheritedboldafter";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expectedIncludeEvents,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+        Assertions.assertEquals(
+                expectedDefault,
+                styledText.getString(StyleType.DEFAULT),
+                "StyledText.getString(DEFAULT) returned an unexpected value.");
+        Assertions.assertEquals(
+                expectedNoFormat,
+                styledText.getString(StyleType.NONE),
+                "StyledText.getString(NONE) returned an unexpected value.");
+    }
+
+    @Test
+    public void fromStringDoesntParseEvents_worksCorrectly() {
+        final String codedString = "§o§<1>inherited hover effect";
+        final StyledText styledText = StyledText.fromString(codedString);
+
+        // Make sure there are no events
+        for (StyledTextPart styledTextPart : styledText) {
+            Style style = styledTextPart.getPartStyle().getStyle();
+
+            if (style.getClickEvent() != null || style.getHoverEvent() != null) {
+                Assertions.fail(
+                        "StyledText.fromString() parsed events when it should not have (since it does not have any underlying events).");
+            }
+        }
+
+        // The output should look the same, as the event chars would be normal text
+        Assertions.assertEquals(
+                codedString,
+                styledText.getString(),
+                "StyledText.fromString() did not parse event-like text correctly.");
+    }
+
+    @Test
+    public void simpleEventInheritance_worksCorrectly() {
+        final Component component = Component.empty()
+                .withStyle(ChatFormatting.ITALIC)
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover"))))
+                .append(Component.literal("inherited hover effect"));
+        final String expected = "§o§<1>inherited hover effect";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+
+        StyledText fromString = StyledText.fromModifiedString(expected, styledText);
+
+        Assertions.assertEquals(
+                expected,
+                fromString.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void eventInheritsImplicitly_worksCorrectly() {
+        final Component component = Component.empty()
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover"))))
+                .append(Component.literal("inherited hover effect"))
+                .append(Component.literal("|inherited hover effect 2 without explicit |"))
+                .append(Component.literal("after red effect").withStyle(ChatFormatting.RED));
+
+        final String expected =
+                "§<1>inherited hover effect|inherited hover effect 2 without explicit |§c§<1>after red effect";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+
+        StyledText fromString = StyledText.fromModifiedString(expected, styledText);
+
+        Assertions.assertEquals(
+                expected,
+                fromString.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void eventInheritsImplicitlyAndResetWorks_worksCorrectly() {
+        final Component component = Component.empty()
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover"))))
+                .append(Component.literal("inherited hover effect"))
+                .append(Component.literal("|inherited red hover effect 2 without explicit |")
+                        .withStyle(ChatFormatting.RED))
+                .append(Component.literal("after no effect").withStyle(ChatFormatting.ITALIC));
+
+        final String expected =
+                "§<1>inherited hover effect§c§<1>|inherited red hover effect 2 without explicit |§r§o§<1>after no effect";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+
+        StyledText fromString = StyledText.fromModifiedString(expected, styledText);
+
+        Assertions.assertEquals(
+                expected,
+                fromString.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void eventDoesntInheritIfItHasEvent_worksCorrectly() {
+        final Component component = Component.empty()
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover"))))
+                .append(Component.literal("inherited hover effect"))
+                .append(Component.literal("|explicit hover effect |")
+                        .withStyle(
+                                style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover2")))));
+
+        final String expected = "§<1>inherited hover effect§<2>|explicit hover effect |";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+
+        StyledText fromString = StyledText.fromModifiedString(expected, styledText);
+
+        Assertions.assertEquals(
+                expected,
+                fromString.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void differentEventsStack_worksCorrectly() {
+        final Component component = Component.empty()
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover")))
+                        .withClickEvent(new ClickEvent.RunCommand("/command")))
+                .append(Component.literal("inherited hover effect"))
+                .append(Component.literal("|explicit hover effect |")
+                        .withStyle(
+                                style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover2")))));
+
+        final String expected = "§[1]§<1>inherited hover effect§<2>|explicit hover effect |";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+
+        StyledText fromString = StyledText.fromModifiedString(expected, styledText);
+
+        Assertions.assertEquals(
+                expected,
+                fromString.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void fromModifiedStringWithEvents_shouldProduceCorrectString() {
+        final String stringWithEvents = "§c§oitalicred§9§o§<1>blue§cnonitalic§oinherited§l§<2>bold§r§[1]after";
+        final List<HoverEvent> hoverEvents = List.of(
+                new HoverEvent.ShowText(Component.literal("hover")),
+                new HoverEvent.ShowText(Component.literal("hover2")));
+        final List<ClickEvent> clickEvents = List.of(new ClickEvent.RunCommand("/command"));
+        final StyledText originalText = StyledText.fromComponent(Component.empty()
+                .append(Component.literal("italicred")
+                        .withStyle(ChatFormatting.ITALIC)
+                        .withStyle(ChatFormatting.RED)
+                        .append(Component.literal("blue")
+                                .withStyle(ChatFormatting.BLUE)
+                                .withStyle(style -> style.withHoverEvent(hoverEvents.getFirst())))
+                        .append(Component.literal("nonitalic").withStyle(Style.EMPTY.withItalic(false)))
+                        .append(Component.literal("inherited")
+                                .append(Component.literal("bold")
+                                        .withStyle(ChatFormatting.BOLD)
+                                        .withStyle(style -> style.withHoverEvent(hoverEvents.get(1))))))
+                .append(Component.literal("after").withStyle(style -> style.withClickEvent(clickEvents.getFirst()))));
+
+        StyledText styledText = StyledText.fromModifiedString(stringWithEvents, originalText);
+
+        int hoverEventCount = 0;
+        int clickEventCount = 0;
+        for (StyledTextPart part : styledText) {
+            if (part.getPartStyle().getStyle().getClickEvent() != null) {
+                if (clickEventCount >= clickEvents.size()) {
+                    Assertions.fail("StyledText.fromModifiedString() had too many click events.");
+                }
+
+                Assertions.assertEquals(
+                        clickEvents.get(clickEventCount),
+                        part.getPartStyle().getStyle().getClickEvent(),
+                        "StyledText.fromModifiedString() did not inherit the correct click event.");
+
+                clickEventCount++;
+            }
+            if (part.getPartStyle().getStyle().getHoverEvent() != null) {
+                if (hoverEventCount >= hoverEvents.size()) {
+                    Assertions.fail("StyledText.fromModifiedString() had too many hover events.");
+                }
+
+                Assertions.assertEquals(
+                        hoverEvents.get(hoverEventCount),
+                        part.getPartStyle().getStyle().getHoverEvent(),
+                        "StyledText.fromModifiedString() did not inherit the correct hover event.");
+
+                hoverEventCount++;
+            }
+        }
+
+        Assertions.assertEquals(
+                stringWithEvents,
+                styledText.getString(StyleType.INCLUDE_EVENTS),
+                "StyledText.getString(INCLUDE_EVENTS) returned an unexpected value.");
+    }
+
+    @Test
+    public void colorResetsFormatting_shouldProduceCorrectString() {
+        // Any color code resets formatting, so the bold should be removed.
+
+        final String testString = "§l§cboldthenred";
+
+        final String expected = "§cboldthenred";
+
+        StyledText styledText = StyledText.fromString(testString);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void colorCodedStyledComponent_shouldProduceCorrectString() {
+        final Component firstTestComponent = Component.literal("§credstring").withStyle(ChatFormatting.BOLD);
+        // Any color code resets formatting, so the bold should be removed.
+        final String firstExpected = "§credstring";
+
+        final Component secondTestComponent = Component.literal("§lboldstring").withStyle(ChatFormatting.RED);
+        // Style is applied first, so the color does not reset the bold.
+        final String secondExpected = "§c§lboldstring";
+
+        final Component thirdTestComponent = Component.literal("boldparent")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("coloredchild").withStyle(ChatFormatting.RED));
+        // Style is applied first, so the color does not reset the bold.
+        final String thirdExpected = "§lboldparent§c§lcoloredchild";
+
+        final Component fourthTestComponent = Component.literal("bold")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("red").withStyle(ChatFormatting.RED))
+                .append(Component.literal("unformatted"));
+        final String fourthExpected = "§lbold§c§lred§r§lunformatted";
+
+        final Component fifthTestComponent =
+                Component.literal("§c§lredthenbold").append(Component.literal("unformattedchild"));
+        final String fifthExpected = "§c§lredthenbold§runformattedchild";
+
+        Assertions.assertEquals(
+                firstExpected,
+                StyledText.fromComponent(firstTestComponent).getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+
+        Assertions.assertEquals(
+                secondExpected,
+                StyledText.fromComponent(secondTestComponent).getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+
+        Assertions.assertEquals(
+                thirdExpected,
+                StyledText.fromComponent(thirdTestComponent).getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+
+        Assertions.assertEquals(
+                fourthExpected,
+                StyledText.fromComponent(fourthTestComponent).getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+
+        Assertions.assertEquals(
+                fifthExpected,
+                StyledText.fromComponent(fifthTestComponent).getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void normalizedStringCreation_shouldProduceCorrectString() {
+        final String badText = "ÀÀHello,ÀÀÀWorld!֎";
+        final String expected = "Hello, World!";
+
+        StyledText styledText = StyledText.fromString(badText);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.getNormalized().getString(StyleType.NONE),
+                "StyledText.getNormalized().getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void alignedStringStripping_shouldProduceCorrectString() {
+        final String badText =
+                "§c\uDAFF\uDFFC\uDB00\uDC06The war for Detlas Close Suburbs will \uDAFF\uDFFC\uDB00\uDC06start in 30 seconds.";
+        final String expected = "§cThe war for Detlas Close Suburbs will start in 30 seconds.";
+
+        StyledText styledText = StyledText.fromString(badText);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.stripAlignment().getString(StyleType.DEFAULT),
+                "StyledText.stripAlignment().getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void normalStringStripping_shouldHaveNoEffect() {
+        final String badText = "Hello, World!";
+        final String expected = "Hello, World!";
+
+        StyledText styledText = StyledText.fromString(badText);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.stripAlignment().getString(StyleType.DEFAULT),
+                "StyledText.stripAlignment().getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void untrimmedText_shouldProduceTrimmedString() {
+        final String badText = "   Hello, World!  ";
+        final String expected = "Hello, World!";
+
+        StyledText styledText = StyledText.fromString(badText);
+
+        Assertions.assertEquals(
+                expected,
+                styledText.trim().getString(StyleType.NONE),
+                "StyledText.getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void emptyText_shouldProduceEmptyString() {
+        StyledText styledText = StyledText.fromString("");
+
+        Assertions.assertTrue(styledText.isEmpty(), "StyledText.isEmpty() returned an unexpected value.");
+    }
+
+    @Test
+    public void blankText_shouldProduceBlankString() {
+        StyledText styledText = StyledText.fromString("    ");
+
+        Assertions.assertTrue(styledText.isBlank(), "StyledText.isBlank() returned an unexpected value.");
+    }
+
+    @Test
+    public void contains_shouldProduceCorrectResult() {
+        final String testString = "§c§oitalicred§9§oblue§cnonitalic§oinherited§lbold§rafter";
+        final String[] expectedParts = {
+            "§c§oitalicred",
+            "§9§oblue",
+            "§cnonitalic",
+            "§oinherited",
+            "§lbold",
+            "§rafter",
+            "licred§9§oblue§cno",
+            "erited§lbo"
+        };
+
+        StyledText styledText = StyledText.fromString(testString);
+
+        for (String expectedPart : expectedParts) {
+            Assertions.assertTrue(
+                    styledText.contains(expectedPart),
+                    "StyledText.contains() could not find a part matching: " + expectedPart);
+        }
+
+        for (String expectedPart : expectedParts) {
+            Assertions.assertTrue(
+                    styledText.contains(StyledText.fromString(expectedPart)),
+                    "StyledText.contains() could not find a part matching: " + expectedPart);
+            Assertions.assertTrue(
+                    styledText.contains(StyledText.fromString(expectedPart), StyleType.NONE),
+                    "StyledText.contains(NONE) could not find a part matching: " + expectedPart);
+        }
+    }
+
+    @Test
+    public void startsWith_shouldProduceCorrectResult() {
+        final String testString = "§c§oitalicred§9§oblue§cnonitalic§oinherited§lbold§rafter";
+        final String expectedStart = "§c§oitalicred";
+        final String expectedMultipartStart = "§c§oitalicred§9§oblue§cnonit";
+
+        StyledText styledText = StyledText.fromString(testString);
+
+        Assertions.assertTrue(
+                styledText.startsWith(expectedStart),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedStart);
+        Assertions.assertTrue(
+                styledText.startsWith(StyledText.fromString(expectedStart)),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedStart);
+
+        Assertions.assertTrue(
+                styledText.startsWith(expectedMultipartStart),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedMultipartStart);
+        Assertions.assertTrue(
+                styledText.startsWith(StyledText.fromString(expectedMultipartStart)),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedMultipartStart);
+    }
+
+    @Test
+    public void endsWith_shouldProduceCorrectResult() {
+        final String testString = "§c§oitalicred§9§oblue§cnonitalic§oinherited§lbold§rafter";
+        final String expectedEnd = "§rafter";
+        final String expectedMultipartEnd = "erited§lbold§rafter";
+
+        StyledText styledText = StyledText.fromString(testString);
+
+        Assertions.assertTrue(
+                styledText.endsWith(expectedEnd),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedEnd);
+        Assertions.assertTrue(
+                styledText.endsWith(StyledText.fromString(expectedEnd)),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedEnd);
+
+        Assertions.assertTrue(
+                styledText.endsWith(expectedMultipartEnd),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedMultipartEnd);
+        Assertions.assertTrue(
+                styledText.endsWith(StyledText.fromString(expectedMultipartEnd)),
+                "StyledText.startsWith() did not produce a correct result for: " + expectedMultipartEnd);
+    }
+
+    @Test
+    public void join_shouldProduceCorrectResult() {
+        final StyledText firstStyled = StyledText.fromString("Hello");
+        final StyledText secondStyled = StyledText.fromString("World");
+
+        final String expected = "Hello, World";
+
+        StyledText joinedStyled = StyledText.join(", ", List.of(firstStyled, secondStyled));
+
+        Assertions.assertEquals(
+                expected,
+                joinedStyled.getString(StyleType.NONE),
+                "StyledText.join() did not produce a correct result.");
+    }
+
+    @Test
+    public void concat_shouldProduceCorrectResult() {
+        final StyledText firstStyled = StyledText.fromString("Hello, ");
+        final StyledText secondStyled = StyledText.fromString("World");
+
+        final String expected = "Hello, World";
+
+        StyledText joinedStyled = StyledText.concat(List.of(firstStyled, secondStyled));
+
+        Assertions.assertEquals(
+                expected,
+                joinedStyled.getString(StyleType.NONE),
+                "StyledText.concat() did not produce a correct result.");
+    }
+
+    @Test
+    public void append_shouldProduceCorrectResult() {
+        final StyledText firstStyled = StyledText.fromString("Hello, ");
+        final StyledText secondStyled = StyledText.fromString("World");
+
+        final String expected = "Hello, World";
+
+        StyledText joinedStyled = firstStyled.append(secondStyled);
+
+        Assertions.assertEquals(
+                expected,
+                joinedStyled.getString(StyleType.NONE),
+                "StyledText.append() did not produce a correct result.");
+    }
+
+    @Test
+    public void prepend_shouldProduceCorrectResult() {
+        final StyledText firstStyled = StyledText.fromString("Hello, ");
+        final StyledText secondStyled = StyledText.fromString("World");
+
+        final String expected = "Hello, World";
+
+        StyledText joinedStyled = secondStyled.prepend(firstStyled);
+
+        Assertions.assertEquals(
+                expected,
+                joinedStyled.getString(StyleType.NONE),
+                "StyledText.prepend() did not produce a correct result.");
+    }
+
+    @Test
+    public void styledText_shouldProduceCorrectComponent() {
+        final Component component = Component.literal("a").append(Component.literal("b"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        // The reconstructed component differs in that StyledText
+        // always adds components as a sibling to an empty component
+        // Note: The comparison is done on the size of the lists, as Style has an equals method that does not
+        //       behave like it's implementation (null != false, when in reality they are equal).
+        Assertions.assertEquals(
+                component.toFlatList().size(),
+                styledText.getComponent().toFlatList().size(),
+                "StyledText.getComponent() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_shouldProduceCorrectMatcher() {
+        final Component component = Component.literal("This is a test string, where there are ")
+                .append(Component.literal("multiple").withStyle(ChatFormatting.BOLD))
+                .append(Component.literal(" components."));
+
+        final Pattern unformattedPattern = Pattern.compile("This is a test string, where there are (.+) components\\.");
+        final Pattern formattedPattern =
+                Pattern.compile("This is a test string, where there are §l(.+)§r components\\.");
+
+        final String expectedMatch = "multiple";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Matcher formattedMatcher = styledText.getMatcher(formattedPattern);
+        Matcher unformattedMatcher = styledText.getMatcher(unformattedPattern, StyleType.NONE);
+
+        Assertions.assertTrue(formattedMatcher.matches(), "StyledText.matches(DEFAULT) returned an unexpected value.");
+        Assertions.assertEquals(
+                expectedMatch,
+                formattedMatcher.group(1),
+                "StyledText.matches(DEFAULT).group() returned an unexpected value.");
+        Assertions.assertTrue(unformattedMatcher.matches(), "StyledText.matches(NONE) returned an unexpected value.");
+        Assertions.assertEquals(
+                expectedMatch,
+                unformattedMatcher.group(1),
+                "StyledText.matches(NONE).group() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_shouldMatchCorrectly() {
+        final Component component = Component.literal("This is a test string, where there are ")
+                .append(Component.literal("multiple").withStyle(ChatFormatting.BOLD))
+                .append(Component.literal(" components."));
+
+        final Pattern unformattedPattern = Pattern.compile("This is a test string, where there are (.+) components\\.");
+        final Pattern formattedPattern =
+                Pattern.compile("This is a test string, where there are §l(.+)§r components\\.");
+
+        final String expectedMatch = "multiple";
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertTrue(
+                styledText.matches(formattedPattern), "StyledText.matches(DEFAULT) returned an unexpected value.");
+        Assertions.assertTrue(
+                styledText.matches(unformattedPattern, StyleType.NONE),
+                "StyledText.matches(NONE) returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_shouldSplitCorrectly() {
+        final Component component = Component.literal("This is a test string, where there are ")
+                .append(Component.literal("multiple").withStyle(ChatFormatting.BOLD))
+                .append(Component.literal(" components."));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        // Split on the word "multiple" to check style inheritance
+        StyledText[] splitTexts = styledText.split("\\.|,|(tip)");
+
+        String[] results = {"This is a test string", " where there are §lmul", "§lle§r components"};
+
+        for (int i = 0; i < splitTexts.length; i++) {
+            StyledText result = splitTexts[i];
+
+            Assertions.assertEquals(
+                    results[i],
+                    result.getString(StyleType.DEFAULT),
+                    "StyledText.split() returned an unexpected value.");
+        }
+    }
+
+    @Test
+    public void styledText_shouldNotSplitColor() {
+        final Component component =
+                Component.literal("This is a formatted test string.").withStyle(ChatFormatting.BOLD);
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText[] splitTexts = styledText.split("§");
+
+        final String result = "§lThis is a formatted test string.";
+
+        Assertions.assertEquals(1, splitTexts.length, "StyledText.split() returned an unexpected value.");
+        Assertions.assertEquals(
+                result, splitTexts[0].getString(StyleType.DEFAULT), "StyledText.split() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_substringShouldSkipBeginningCorrectly() {
+        final Component component = Component.literal("This is a test string").withStyle(ChatFormatting.BOLD);
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText substringText = styledText.substring(5);
+
+        final String result = "§lis a test string";
+
+        Assertions.assertEquals(
+                result,
+                substringText.getString(StyleType.DEFAULT),
+                "StyledText.substring() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_multipartSubstringShouldWork() {
+        final Component component = Component.literal("a")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("bb"))
+                .append(Component.literal("ccc"))
+                .append(Component.literal("dddd"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText substringText = styledText.substring(1, 8);
+
+        final String result = "§lbbcccdd";
+
+        Assertions.assertEquals(
+                result,
+                substringText.getString(StyleType.DEFAULT),
+                "StyledText.substring() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_substringShouldWork() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        StyledText substringText = text.substring(0, 4);
+
+        String substring = substringText.getString();
+
+        final String result = "§1koal";
+
+        Assertions.assertEquals(result, substring, "StyledText.substring() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_substringWithFormattingShouldWork() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        StyledText substringText = text.substring(0, 4, StyleType.DEFAULT);
+
+        String substring = substringText.getString();
+
+        final String result = "§1ko";
+
+        Assertions.assertEquals(result, substring, "StyledText.substring() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_substringWithFormattingShouldErrorOnSplitFormattingCode() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> text.substring(0, 1, StyleType.DEFAULT),
+                "StyledText.substring() did not throw an exception for split formatting code.");
+    }
+
+    @Test
+    public void styledText_partitionShouldWork() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        StyledText[] separatedTexts = text.partition(6);
+
+        String first = separatedTexts[0].getString();
+        String second = separatedTexts[1].getString();
+
+        final String firstResult = "§1koala§2b";
+        final String secondResult = "§2ear";
+
+        Assertions.assertEquals(firstResult, first, "StyledText.separate() returned an unexpected value.");
+        Assertions.assertEquals(secondResult, second, "StyledText.separate() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_partitionMultipleIndexesShouldWork() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        StyledText[] separatedTexts = text.partition(1, 3, 6, 7);
+
+        String first = separatedTexts[0].getString();
+        String second = separatedTexts[1].getString();
+        String third = separatedTexts[2].getString();
+        String fourth = separatedTexts[3].getString();
+        String fifth = separatedTexts[4].getString();
+
+        final String firstResult = "§1k";
+        final String secondResult = "§1oa";
+        final String thirdResult = "§1la§2b";
+        final String fourthResult = "§2e";
+        final String fifthResult = "§2ar";
+
+        Assertions.assertEquals(firstResult, first, "StyledText.separate() returned an unexpected value.");
+        Assertions.assertEquals(secondResult, second, "StyledText.separate() returned an unexpected value.");
+        Assertions.assertEquals(thirdResult, third, "StyledText.separate() returned an unexpected value.");
+        Assertions.assertEquals(fourthResult, fourth, "StyledText.separate() returned an unexpected value.");
+        Assertions.assertEquals(fifthResult, fifth, "StyledText.separate() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_partitionWithUnorderedIndexesShouldError() {
+        final StyledText text = StyledText.fromString("§1koala§2bear");
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> text.partition(3, 1),
+                "StyledText.separate() did not throw an exception for unordered indexes.");
+    }
+
+    @Test
+    public void styledText_replaceShouldOnlyReplaceFirstOccurence() {
+        final Component component = Component.literal("a")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("bb"))
+                .append(Component.literal("ccc"))
+                .append(Component.literal("dddd"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText replacedText = styledText.replaceFirst("b", "x");
+
+        final String result = "§laxbcccdddd";
+
+        Assertions.assertEquals(
+                result,
+                replacedText.getString(StyleType.DEFAULT),
+                "StyledText.replace() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_replaceAllShouldReplaceAllOccurences() {
+        final Component component = Component.literal("a")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("bb"))
+                .append(Component.literal("ccc"))
+                .append(Component.literal("dddd"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText replacedText = styledText.replaceAll("[b|c]", "x");
+
+        final String result = "§laxxxxxdddd";
+
+        Assertions.assertEquals(
+                result,
+                replacedText.getString(StyleType.DEFAULT),
+                "StyledText.replaceAll() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_withoutFormattingShouldReplaceStripFormatting() {
+        final Component component = Component.literal("a")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("bb"))
+                .append(Component.literal("ccc").withStyle(ChatFormatting.RED).withStyle(ChatFormatting.ITALIC))
+                .append(Component.literal("dddd").withStyle(ChatFormatting.UNDERLINE));
+
+        StyledText styledText = StyledText.fromComponent(component).withoutFormatting();
+
+        final String result = "abbcccdddd";
+
+        Assertions.assertEquals(
+                result,
+                styledText.getString(StyleType.DEFAULT),
+                "StyledText.replaceAll() returned an unexpected value.");
+
+        Assertions.assertEquals(
+                result, styledText.getString(StyleType.NONE), "StyledText.replaceAll() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_getStringWithNonChatFormattingColors() {
+        final CustomColor color = new CustomColor(36, 12, 42);
+        final Component component = Component.literal("test").withStyle(style -> style.withColor(color.asInt()));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        final String result = "§#240c2afftest";
+        Assertions.assertEquals(
+                result,
+                styledText.getString(StyleType.DEFAULT),
+                "StyledText.getString() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_fromStringWithNonChatFormattingColors() {
+        final CustomColor color = new CustomColor(36, 12, 42).withAlpha(255);
+        final StyledText styledText = StyledText.fromComponent(Component.literal("test"))
+                .iterate((part, changes) -> {
+                    changes.remove(part);
+                    changes.add(part.withStyle(style -> style.withColor(color)));
+                    return IterationDecision.CONTINUE;
+                });
+
+        StyledTextPart firstPart = styledText.getFirstPart();
+        Assertions.assertNotNull(firstPart, "StyledText.fromString() did not produce a part.");
+
+        CustomColor textColor = firstPart.getPartStyle().getColor();
+
+        Assertions.assertEquals(color, textColor, "StyledText.fromString() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_inheritsHoverEvents() {
+        final Component component = Component.empty()
+                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("hover"))))
+                .append(Component.literal("inherited hover effect"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        Assertions.assertEquals(
+                component.getStyle().getHoverEvent(),
+                styledText.getComponent().toFlatList().getFirst().getStyle().getHoverEvent(),
+                "StyledText.fromComponent() did not inherit the correct hover event.");
+    }
+
+    @Test
+    public void styledText_mapShouldProduceCorrectResult() {
+        final Component component = Component.literal("a")
+                .withStyle(ChatFormatting.BOLD)
+                .append(Component.literal("bb"))
+                .append(Component.literal("ccc"))
+                .append(Component.literal("dddd"));
+
+        StyledText styledText = StyledText.fromComponent(component);
+
+        StyledText mappedText = styledText.map(part -> new StyledTextPart(
+                "." + part.getString(null, StyleType.NONE),
+                part.getPartStyle().withColor(ChatFormatting.AQUA).getStyle(),
+                part.getParent(),
+                null));
+
+        final String result = "§b§l.a.bb.ccc.dddd";
+
+        Assertions.assertEquals(
+                result, mappedText.getString(StyleType.DEFAULT), "StyledText.map() returned an unexpected value.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldRoundtripFromJson() {
+        JsonArray original = new JsonArray();
+
+        JsonObject part1 = new JsonObject();
+        part1.addProperty("text", "Hello ");
+        part1.addProperty("bold", true);
+        part1.addProperty("color", "#FFAA00");
+        original.add(part1);
+
+        JsonObject part2 = new JsonObject();
+        part2.addProperty("text", "World");
+        part2.addProperty("italic", true);
+        part2.addProperty("underline", true);
+        part2.addProperty("strikethrough", true);
+        part2.addProperty("font", "common");
+        original.add(part2);
+
+        StyledText styledText = StyledText.fromJson(original);
+        JsonArray result = styledText.toJson();
+
+        Assertions.assertEquals(original, result, "StyledText.toJson() did not roundtrip fromJson correctly.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldRoundtripMarginLeft() {
+        // Thin margin
+        JsonArray thinJson = new JsonArray();
+        JsonObject thinObj = new JsonObject();
+        thinObj.addProperty("text", "indented");
+        thinObj.addProperty("margin-left", "thin");
+        thinJson.add(thinObj);
+
+        StyledText thinText = StyledText.fromJson(thinJson);
+        JsonArray thinResult = thinText.toJson();
+
+        Assertions.assertEquals(
+                thinJson, thinResult, "StyledText.toJson() did not roundtrip thin margin-left correctly.");
+
+        // Large margin
+        JsonArray largeJson = new JsonArray();
+        JsonObject largeObj = new JsonObject();
+        largeObj.addProperty("text", "indented");
+        largeObj.addProperty("margin-left", "large");
+        largeJson.add(largeObj);
+
+        StyledText largeText = StyledText.fromJson(largeJson);
+        JsonArray largeResult = largeText.toJson();
+
+        Assertions.assertEquals(
+                largeJson, largeResult, "StyledText.toJson() did not roundtrip large margin-left correctly.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldOmitDefaultFont() {
+        JsonArray jsonArray = new JsonArray();
+        JsonObject obj = new JsonObject();
+        obj.addProperty("text", "hello");
+        obj.addProperty("font", "default");
+        jsonArray.add(obj);
+
+        StyledText styledText = StyledText.fromJson(jsonArray);
+        JsonArray result = styledText.toJson();
+
+        JsonObject resultObj = result.get(0).getAsJsonObject();
+        Assertions.assertFalse(resultObj.has("font"), "StyledText.toJson() should not include default font.");
+        Assertions.assertEquals(
+                "hello", resultObj.get("text").getAsString(), "Text should be preserved when default font is omitted.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldRoundtripFromComponent() {
+        Component component = Component.literal("boldred")
+                .withStyle(ChatFormatting.BOLD)
+                .withStyle(ChatFormatting.RED)
+                .append(Component.literal("italic").withStyle(ChatFormatting.ITALIC))
+                .append(Component.literal("underline").withStyle(ChatFormatting.UNDERLINE));
+
+        StyledText original = StyledText.fromComponent(component);
+        JsonArray json = original.toJson();
+        StyledText roundtrip = StyledText.fromJson(json);
+
+        // Verify the JSON output is valid input for fromJson
+        Assertions.assertEquals(
+                original.getString(StyleType.DEFAULT),
+                roundtrip.getString(StyleType.DEFAULT),
+                "StyledText.toJson() output was not valid for fromJson roundtrip.");
+
+        // Verify the JSON structure explicitly
+        Assertions.assertEquals(3, json.size(), "Should have 3 parts.");
+
+        JsonObject first = json.get(0).getAsJsonObject();
+        Assertions.assertEquals("boldred", first.get("text").getAsString());
+        Assertions.assertTrue(first.get("bold").getAsBoolean());
+        Assertions.assertEquals("#FF5555", first.get("color").getAsString());
+
+        JsonObject second = json.get(1).getAsJsonObject();
+        Assertions.assertEquals("italic", second.get("text").getAsString());
+        Assertions.assertTrue(second.get("italic").getAsBoolean());
+
+        JsonObject third = json.get(2).getAsJsonObject();
+        Assertions.assertEquals("underline", third.get("text").getAsString());
+        Assertions.assertTrue(third.get("underline").getAsBoolean());
+    }
+
+    @Test
+    public void styledText_toJson_shouldHandleEmptyText() {
+        JsonArray original = new JsonArray();
+        JsonObject obj = new JsonObject();
+        obj.addProperty("text", "");
+        original.add(obj);
+
+        StyledText styledText = StyledText.fromJson(original);
+        JsonArray result = styledText.toJson();
+
+        // Empty parts are filtered by the StyledText constructor
+        JsonArray expected = new JsonArray();
+
+        Assertions.assertEquals(expected, result, "StyledText.toJson() did not handle empty text correctly.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldHandleHexColor() {
+        JsonArray original = new JsonArray();
+        JsonObject obj = new JsonObject();
+        obj.addProperty("text", "custom");
+        obj.addProperty("color", "#240C2A");
+        original.add(obj);
+
+        StyledText styledText = StyledText.fromJson(original);
+        JsonArray result = styledText.toJson();
+
+        Assertions.assertEquals(original, result, "StyledText.toJson() did not roundtrip hex color correctly.");
+    }
+
+    @Test
+    public void styledText_toJson_shouldRoundtripRealDescription() {
+        String descriptionJson = """
+        {
+          "description": [
+            [
+              {
+                "text": "Click Combo: ",
+                "color": "#FFAA00"
+              },
+              {
+                "text": "RIGHT",
+                "bold": true,
+                "color": "#FF55FF"
+              },
+              {
+                "text": "-",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "LEFT",
+                "bold": true,
+                "color": "#FF55FF"
+              },
+              {
+                "text": "-",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "LEFT",
+                "bold": true,
+                "color": "#FF55FF"
+              }
+            ],
+            [
+              {
+                "text": " ",
+                "color": "#AAAAAA"
+              }
+            ],
+            [
+              {
+                "text": "Conjures a slow but powerful meteor",
+                "color": "#AAAAAA"
+              }
+            ],
+            [
+              {
+                "text": "from the sky, dealing massive",
+                "color": "#AAAAAA"
+              }
+            ],
+            [
+              {
+                "text": "damage over a large area.",
+                "color": "#AAAAAA"
+              }
+            ],
+            [
+              {
+                "text": " ",
+                "color": "#AAAAAA"
+              }
+            ],
+            [
+              {
+                "text": "",
+                "font": "common",
+                "color": "#66E6FF"
+              },
+              {
+                "text": " ",
+                "color": "#66E6FF"
+              },
+              {
+                "text": "Mana Cost: ",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "50",
+                "color": "#FFFFFF"
+              }
+            ],
+            [
+              {
+                "text": "",
+                "font": "common",
+                "color": "#FF5555"
+              },
+              {
+                "text": " ",
+                "color": "#FF5555"
+              },
+              {
+                "text": "Total Damage: ",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "400% ",
+                "color": "#FFFFFF"
+              },
+              {
+                "text": "(of your DPS)",
+                "color": "#555555"
+              }
+            ],
+            [
+              {
+                "text": "  ",
+                "color": "#AAAAAA",
+                "margin-left": "large"
+              },
+              {
+                "text": "(",
+                "color": "#555555"
+              },
+              {
+                "text": "",
+                "font": "common",
+                "color": "#FFAA00"
+              },
+              {
+                "text": " ",
+                "color": "#FFAA00"
+              },
+              {
+                "text": "Damage: ",
+                "color": "#555555"
+              },
+              {
+                "text": "330%",
+                "color": "#555555"
+              },
+              {
+                "text": ")",
+                "color": "#555555"
+              }
+            ],
+            [
+              {
+                "text": "  ",
+                "color": "#AAAAAA",
+                "margin-left": "large"
+              },
+              {
+                "text": "(",
+                "color": "#555555"
+              },
+              {
+                "text": "",
+                "font": "common",
+                "color": "#00AA00"
+              },
+              {
+                "text": " ",
+                "color": "#00AA00"
+              },
+              {
+                "text": "Earth: ",
+                "color": "#555555"
+              },
+              {
+                "text": "70%",
+                "color": "#555555"
+              },
+              {
+                "text": ")",
+                "color": "#555555"
+              }
+            ],
+            [
+              {
+                "text": "",
+                "font": "common",
+                "color": "#00AA00"
+              },
+              {
+                "text": " ",
+                "color": "#00AA00"
+              },
+              {
+                "text": "Range: ",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "18 Blocks",
+                "color": "#FFFFFF"
+              }
+            ],
+            [
+              {
+                "text": "",
+                "font": "common",
+                "color": "#00AAAA"
+              },
+              {
+                "text": " ",
+                "color": "#00AAAA"
+              },
+              {
+                "text": "Area of Effect: ",
+                "color": "#AAAAAA"
+              },
+              {
+                "text": "5 Blocks ",
+                "color": "#FFFFFF"
+              },
+              {
+                "text": "(Circle-Shaped)",
+                "color": "#AAAAAA"
+              }
+            ]
+          ]
+        }
+        """;
+
+        JsonObject root = JsonParser.parseString(descriptionJson).getAsJsonObject();
+        JsonArray description = root.getAsJsonArray("description");
+
+        for (int i = 0; i < description.size(); i++) {
+            JsonArray line = description.get(i).getAsJsonArray();
+            StyledText styledText = StyledText.fromJson(line);
+            JsonArray result = styledText.toJson();
+
+            Assertions.assertEquals(
+                    line, result, "StyledText.toJson() did not roundtrip description line " + i + " correctly.");
+        }
+    }
+}

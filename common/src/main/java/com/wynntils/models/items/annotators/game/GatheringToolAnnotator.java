@@ -1,0 +1,49 @@
+/*
+ * Copyright © Wynntils 2022-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.models.items.annotators.game;
+
+import com.wynntils.core.components.Models;
+import com.wynntils.core.text.StyledText;
+import com.wynntils.handlers.item.GameItemAnnotator;
+import com.wynntils.handlers.item.ItemAnnotation;
+import com.wynntils.models.items.items.game.GatheringToolItem;
+import com.wynntils.models.profession.type.GatheringToolInfo;
+import com.wynntils.utils.mc.LoreUtils;
+import com.wynntils.utils.type.CappedValue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import net.minecraft.world.item.ItemStack;
+
+public final class GatheringToolAnnotator implements GameItemAnnotator {
+    private static final Pattern GATHERING_TOOL_PATTERN =
+            Pattern.compile("^\uDAFC\uDC00§.(.+ (?:Axe|Rod|Scythe|Pickaxe) T(?:\\d+))\uDAFC\uDC00$");
+    private static final Pattern DURABILITY_PATTERN = Pattern.compile(".+?§7 Durability (\\d+)/(\\d+)");
+
+    @Override
+    public ItemAnnotation getAnnotation(ItemStack itemStack, StyledText name) {
+        Matcher matcher = name.getMatcher(GATHERING_TOOL_PATTERN);
+        if (!matcher.matches()) return null;
+
+        String toolName = matcher.group(1);
+
+        GatheringToolInfo toolInfo = Models.Profession.getToolFromName(toolName);
+        if (toolInfo == null) return null;
+
+        CappedValue durability = getDurability(itemStack);
+
+        return new GatheringToolItem(toolInfo, durability);
+    }
+
+    private CappedValue getDurability(ItemStack itemStack) {
+        Matcher matcher = LoreUtils.matchLoreLine(itemStack, 4, DURABILITY_PATTERN);
+        if (matcher.matches()) {
+            int currentDurability = Integer.parseInt(matcher.group(1));
+            int maxDurability = Integer.parseInt(matcher.group(2));
+            return new CappedValue(currentDurability, maxDurability);
+        }
+
+        return CappedValue.EMPTY;
+    }
+}

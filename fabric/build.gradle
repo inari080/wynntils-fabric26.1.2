@@ -1,0 +1,98 @@
+plugins {
+    // NOTE: for Minecraft 26.1+ this plugin id changed from "fabric-loom" to "net.fabricmc.fabric-loom".
+    // The new id activates the non-remapping mode of Loom (there is nothing to remap: 26.1+ ships
+    // unobfuscated, so `jar` IS the final artifact - there is no more `remapJar`).
+    // Check https://fabricmc.net/develop/ for the currently recommended Loom version for 26.1.2.
+    id "net.fabricmc.fabric-loom" version "1.15"
+    id "com.gradleup.shadow" version "${shadow_version}"
+}
+
+loom {
+    // v2/official: 26.1+ access wideners must target official Mojang names ("official"),
+    // not "named" (there is no separate "named" namespace anymore since the game is unobfuscated).
+    accessWidenerPath = file("src/main/resources/wynntils.accessWidener")
+}
+
+configurations {
+    shadowCommon
+    implementation.extendsFrom shadowImplementation
+}
+
+repositories {
+    maven { url "https://jitpack.io" }
+    maven { url "https://api.modrinth.com/maven" }
+}
+
+dependencies {
+    // Plain "implementation" project dependency - common is a normal java-library module now,
+    // not something Loom needs to know about.
+    implementation project(":common")
+    shadowCommon project(":common")
+
+    // Fabric Loader + Fabric API are regular (non-"mod") dependencies now; nothing needs remapping.
+    implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    include(implementation(fabricApi.module("fabric-api-base", fabric_version)))
+    include(implementation(fabricApi.module("fabric-resource-loader-v1", fabric_version)))
+
+    // TODO: confirm a 26.1.2 build of ModMenu exists before uncommenting - see gradle.properties TODO.
+    compileOnly("maven.modrinth:modmenu:${modmenu_version}")
+
+    shadowImplementation("net.neoforged:bus:${neoforge_eventbus_version ?: '8.0.5'}") {
+        exclude group: "org.ow2.asm"
+        exclude group: "org.apache.logging.log4j"
+        exclude group: "cpw.mods", module: "modlauncher"
+    }
+
+    shadowImplementation("com.github.wynntils:hades:v${hades_version}") { transitive = false }
+    shadowImplementation("com.github.wynntils:antiope:v${antiope_version}") { transitive = false }
+
+    include(implementation(annotationProcessor("io.github.llamalad7:mixinextras-fabric:${mixinextras_version}")))
+
+    // TODO: confirm a 26.1.2 build of DevAuth exists - see gradle.properties TODO. If not yet available,
+    // just delete this line; it is a dev-convenience dependency only, not required to build/run the mod.
+    runtimeOnly "me.djtheredstoner:DevAuth-fabric:${devauth_version}"
+
+    testImplementation "net.fabricmc:fabric-loader-junit:${fabric_loader_version}"
+    testImplementation "org.junit.jupiter:junit-jupiter:${junit_version}"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+processResources {
+    var replaceProperties = [
+        mod_version          : rootProject.version,
+        minecraft_version    : fabric_minecraft_version_range,
+        fabric_loader_version: fabric_loader_version,
+        mod_id               : mod_id
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching("fabric.mod.json") {
+        expand replaceProperties
+    }
+}
+
+shadow {
+    addShadowVariantIntoJavaComponent = false
+}
+
+// There is no more separate "dev" jar / remapJar step: 26.1+ is unobfuscated, so shadowJar's output
+// IS the distributable jar. We repoint `jar` (and its archiveClassifier) directly at the shadow output.
+shadowJar {
+    configurations = [
+        project.configurations.shadowCommon,
+        project.configurations.shadowImplementation
+    ]
+    archiveClassifier = "fabric+MC-${minecraft_version}"
+}
+
+jar.finalizedBy(shadowJar)
+
+sourcesJar {
+    def commonSources = project(":common").sourcesJar
+    dependsOn commonSources
+    from commonSources.archiveFile.map { zipTree(it) }
+    archiveClassifier = "fabric+MC-${minecraft_version}-sources"
+}

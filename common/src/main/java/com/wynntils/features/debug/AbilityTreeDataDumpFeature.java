@@ -1,0 +1,91 @@
+/*
+ * Copyright © Wynntils 2023-2026.
+ * This file is released under LGPLv3. See LICENSE for full license details.
+ */
+package com.wynntils.features.debug;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.wynntils.core.WynntilsMod;
+import com.wynntils.core.components.Managers;
+import com.wynntils.core.components.Models;
+import com.wynntils.core.consumers.features.Feature;
+import com.wynntils.core.consumers.features.ProfileDefault;
+import com.wynntils.core.persisted.config.Category;
+import com.wynntils.core.persisted.config.ConfigCategory;
+import com.wynntils.mc.event.ContainerClickEvent;
+import com.wynntils.models.abilitytree.type.AbilityTreeInfo;
+import com.wynntils.models.items.items.gui.AbilityTreeItem;
+import com.wynntils.utils.mc.KeyboardUtils;
+import com.wynntils.utils.mc.McUtils;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.Optional;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.network.chat.Component;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
+
+// NOTE: This feature was intented to be used on fully reset ability trees.
+//       Although support for parsing any tree is present, I would still recommend using a fresh tree to avoid any
+//       issues.
+@ConfigCategory(Category.DEBUG)
+public class AbilityTreeDataDumpFeature extends Feature {
+    private static final File SAVE_FOLDER = WynntilsMod.getModStorageDir("debug");
+
+    public AbilityTreeDataDumpFeature() {
+        super(ProfileDefault.DISABLED);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onInventoryClick(ContainerClickEvent event) {
+        if (!(McUtils.screen() instanceof AbstractContainerScreen<?> abstractContainerScreen)) return;
+        if (!KeyboardUtils.isShiftDown()) return;
+
+        Optional<AbilityTreeItem> abilityTreeItem = Models.Item.asWynnItem(event.getItemStack(), AbilityTreeItem.class);
+
+        if (abilityTreeItem.isEmpty()) return;
+
+        event.setCanceled(true);
+        McUtils.player().closeContainer();
+
+        // Wait for the container to close
+        Managers.TickScheduler.scheduleNextTick(() -> Models.AbilityTree.ABILITY_TREE_CONTAINER_QUERIES.dumpAbilityTree(
+                this::saveToDisk, WynntilsMod::info, error -> {}, WynntilsMod::info));
+    }
+
+    private void saveToDisk(AbilityTreeInfo abilityTreeInfo) {
+        File expandedJsonFile = new File(SAVE_FOLDER, "abilities_v2_expanded.json");
+        File minifiedJsonFile = new File(SAVE_FOLDER, "abilities_v2.json");
+
+        JsonObject root = new JsonObject();
+        if (expandedJsonFile.exists()) {
+            try (FileReader reader = new FileReader(expandedJsonFile, StandardCharsets.UTF_8)) {
+                JsonElement existing = Managers.Json.GSON.fromJson(reader, JsonElement.class);
+                if (existing != null && existing.isJsonObject()) {
+                    root = existing.getAsJsonObject();
+                }
+            } catch (Exception e) {
+                WynntilsMod.error("Failed to read existing abilities file", e);
+            }
+        }
+
+        String classKey = Models.Character.getClassType().getName().toLowerCase(Locale.ROOT);
+        JsonElement element = Managers.Json.GSON.toJsonTree(abilityTreeInfo);
+        root.add(classKey, element);
+
+        Managers.Json.savePreciousJson(expandedJsonFile, root);
+
+        try (FileWriter writer = new FileWriter(minifiedJsonFile, StandardCharsets.UTF_8)) {
+            writer.write(root.toString());
+        } catch (Exception e) {
+            WynntilsMod.error("Failed to save minified abilities file", e);
+        }
+
+        McUtils.sendWynntilsPrefixMessage(Component.literal(
+                "Saved ability tree dump for " + classKey + " to " + expandedJsonFile.getAbsolutePath()));
+    }
+}
