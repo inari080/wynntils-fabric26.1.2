@@ -13,6 +13,15 @@ repositories {
 }
 
 dependencies {
+    // Minecraft API (Mojang) — compile 時に参照するために追加
+    compileOnly "com.mojang:minecraft:${minecraft_version}"
+// Brigadier（コマンド処理ライブラリ）
+    compileOnly "com.mojang:brigadier:1.0.18"
+// Guava（CaseFormat など）
+    compileOnly "com.google.guava:guava:32.1.2-jre"
+// Gson（Mixin の注釈処理で必要になることがあるため）
+    compileOnly "com.google.code.gson:gson:2.10.1"
+    annotationProcessor "com.google.code.gson:gson:2.10.1"
     // コンパイルに必要なアノテーションプロセッサとMixin/ASMライブラリのみを安全に定義します。
     // ※ここに ':fabric' の configurations を直接参照するような古い記述は一切含めません。
     compileOnly "org.spongepowered:mixin:0.8.5"
@@ -25,6 +34,12 @@ dependencies {
     annotationProcessor "org.ow2.asm:asm:9.7.1"
     annotationProcessor "org.ow2.asm:asm-tree:9.7.1"
     annotationProcessor "org.ow2.asm:asm-commons:9.7.1"
+
+    // Gson が存在しないと Mixin のアノテーションプロセッサ実行時に NoClassDefFoundError が発生します。
+    // そのため annotationProcessor クラスパスに Gson を追加します。
+    compileOnly "com.google.code.gson:gson:2.10.1"
+    annotationProcessor "com.google.code.gson:gson:2.10.1"
+
     // We depend on fabric loader here only to use the fabric @Environment annotation and
     // net.fabricmc.loader.api classes at compile time. Do NOT use other classes from fabric loader.
     // Plain (non-"mod") dependency: this is a plain jar, not something Loom needs to remap.

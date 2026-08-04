@@ -1,0 +1,90 @@
+﻿
+  発生場所 行:1 文字:2
+  +  .\gradlew.bat :common:compileJava --stacktrace --info --console=plai ...
+  +  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+>     + CategoryInfo          : NotSpecified: (WARNING: A rest...has been called:String) [], RemoteException
+>     + FullyQualifiedErrorId : NativeCommandError
+   
+  WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/C:/Users/makik/.gradle
+/w
+  rapper/dists/gradle-9.6.1-bin/4ticwg1pgcbps2hj28r8so764/gradle-9.6.1/lib/native-platform-0.22-milestone-29.jar)
+    Task has failed previously.
+  The input changes require a full rebuild for incremental task ':common:compileJava'.
+  Compilation mode: in-process compilation
+> Full recompilation is required because no incremental change information is available. This is usually caused by clean builds or changing compiler arguments.
+  Compiling with toolchain 'C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot'.
+  Invalidating in-memory cache of C:\Users\makik\.gradle\caches\9.6.1\fileContent\java-modules.bin
+  Invalidating in-memory cache of C:\Users\makik\.gradle\caches\9.6.1\fileContent\annotation-processors.bin
+    繧ｷ繝ｳ繝懊Ν:   繧ｯ繝ｩ繧ｹ CommandSourceStack
+    蝣ｴ謇: 繧ｯ繝ｩ繧ｹ CompassCommand
+  C:\Users\makik\Downloads\wynntils-26.1.2-fabric-port\port\common\src\main\java\com\wynntils\commands\CompassCommand.java:303: 繧ｨ繝ｩ繝ｼ: 繧ｷ繝ｳ繝懊Ν繧定ｦ九▽縺代ｉ繧後∪縺帙ｓ
+>     public int syntaxError(CommandContext<CommandSourceStack> context) {
+                             ^
+    繧ｷ繝ｳ繝懊Ν:   繧ｯ繝ｩ繧ｹ CommandContext
+    蝣ｴ謇: 繧ｯ繝ｩ繧ｹ CompassCommand
+  C:\Users\makik\Downloads\wynntils-26.1.2-fabric-port\port\common\src\main\java\com\wynntils\commands\CompassCommand.java:303: 繧ｨ繝ｩ繝ｼ: 繧ｷ繝ｳ繝懊Ν繧定ｦ九▽縺代ｉ繧後∪縺帙ｓ
+>     public int syntaxError(CommandContext<CommandSourceStack> context) {
+                                            ^
+    繧ｷ繝ｳ繝懊Ν:   繧ｯ繝ｩ繧ｹ CommandSourceStack
+    蝣ｴ謇: 繧ｯ繝ｩ繧ｹ CompassCommand
+  import net.minecraft.commands.SharedSuggestionProvider;
+                               ^
+  
+> FAILURE: Build failed with an exception.
+  
+  * What went wrong:
+  Execution failed for task ':common:compileJava' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugin').
+> > java.lang.NoClassDefFoundError: com/google/gson/JsonParseException
+  
+  * Try:
+  > Run with --debug option to get more log output.
+  > Run with --scan to get full insights from a Build Scan (powered by Develocity).
+  > Get more help at https://help.gradle.org.
+  
+> * Exception is:
+> org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':common:compileJava' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugi
+n'
+  ).
+  	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:135)
+> 	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:288)
+  	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:133)
+  	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:121)
+  	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:41)
+  	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+  	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+  	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+> 	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
+  	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
+  	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
+  	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
+  	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:328)
+  	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
+  	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
+> 	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+  	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
+> Caused by: java.lang.RuntimeException: java.lang.NoClassDefFoundError: com/google/gson/JsonParseException
+  	at org.gradle.internal.compiler.java.IncrementalCompileTask.call(IncrementalCompileTask.java:92)
+  	at org.gradle.api.internal.tasks.compile.AnnotationProcessingCompileTask.call(AnnotationProcessingCompileTask.java:94)
+  	at org.gradle.api.internal.tasks.compile.ResourceCleaningCompilationTask.call(ResourceCleaningCompilationTask.java:57)
+  	at org.gradle.api.internal.tasks.compile.JdkJavaCompiler.execute(JdkJavaCompiler.java:82)
+  	at org.gradle.api.internal.tasks.compile.JdkJavaCompiler.execute(JdkJavaCompiler.java:49)
+> 	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.delegateAndHandleErrors(NormalizingJavaCompiler.java:98)
+  	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.execute(NormalizingJavaCompiler.java:52)
+  	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.execute(NormalizingJavaCompiler.java:38)
+  	at org.gradle.api.internal.tasks.compile.AnnotationProcessorDiscoveringCompiler.execute(AnnotationProcessorDiscoveringCompiler.java:52)
+  	at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:68)
+  	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:132)
+  	... 30 more
+> Caused by: java.lang.NoClassDefFoundError: com/google/gson/JsonParseException
+  	at org.spongepowered.tools.obfuscation.ReferenceManager.<init>(ReferenceManager.java:91)
+  	at org.spongepowered.tools.obfuscation.ObfuscationManager.<init>(ObfuscationManager.java:76)
+  	at org.spongepowered.tools.obfuscation.AnnotatedMixins.<init>(AnnotatedMixins.java:159)
+  Watched directory hierarchies: [C:\Users\makik\Downloads\wynntils-26.1.2-fabric-port\port]
+  	at org.gradle.api.internal.tasks.compile.processing.TimeTrackingProcessor.init(TimeTrackingProcessor.java:86)
+  	... 169 more
+> Caused by: java.lang.ClassNotFoundException: com.google.gson.JsonParseException
+  	... 183 more
+  
+  
+
+
